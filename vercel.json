@@ -8,5 +8,13 @@
       "source": "/router-api",
       "destination": "/api/router-api"
     }
-  ]
+  ],
+  "functions": {
+    "api/router-api.js": {
+      "runtime": "nodejs20.x"
+    },
+    "api/router-api/[...path].js": {
+      "runtime": "nodejs20.x"
+    }
+  }
 }
