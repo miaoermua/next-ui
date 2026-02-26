@@ -65,6 +65,7 @@ pnpm run preview
 - 前端统一请求前缀：`/router-api`
 - 开发代理中间件：`vite.config.js`
 - 生产代理入口：`api/router-api.js`（由 `vercel.json` 将 `/router-api/*` 重写到该函数）
+- 前端会将真实上游路径编码到查询参数 `__path`（例如 `%2Fcgi-bin%2Fluci...`），用于减少外层网关对 `/cgi-bin` 路径关键字的拦截风险
 - 路由器目标由请求头控制：
   - `x-router-host`（例如 `10.0.0.4`）
   - `x-router-scheme`（`http` 或 `https`）

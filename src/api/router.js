@@ -71,7 +71,8 @@ function normalizeRouterAddress(address) {
 
 function resolveApiUrl(url) {
   const normalizedPath = url.startsWith('/') ? url : `/${url}`
-  return `/router-api${normalizedPath}`
+  const encodedPath = encodeURIComponent(normalizedPath)
+  return `/router-api?__path=${encodedPath}`
 }
 
 function resolveLuciPath(path) {

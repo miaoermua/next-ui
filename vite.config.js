@@ -54,6 +54,20 @@ function rewriteSetCookie(cookie, proxyBasePath = '/router-api') {
   return rewritten.join('; ')
 }
 
+function resolveRawPathFromProxyUrl(url) {
+  const parsed = new URL(url, 'http://router-api.local')
+  const queryPath = parsed.searchParams.get('__path')
+
+  if (queryPath) {
+    const decodedPath = decodeURIComponent(queryPath)
+    return decodedPath.startsWith('/') ? decodedPath : `/${decodedPath}`
+  }
+
+  const pathname = parsed.pathname.replace(/^\/router-api/, '') || '/'
+  const query = parsed.searchParams.toString()
+  return query ? `${pathname}?${query}` : pathname
+}
+
 function createRouterApiMiddleware() {
   return (req, res, next) => {
     if (!req.url || !req.url.startsWith('/router-api')) {
@@ -66,7 +80,7 @@ function createRouterApiMiddleware() {
     const targetScheme = sanitizeSchemeValue(req.headers['x-router-scheme'], 'http')
     const targetOrigin = `${targetScheme}://${targetHost}`
 
-    const rawPath = req.url.replace(/^\/router-api/, '') || '/'
+    const rawPath = resolveRawPathFromProxyUrl(req.url)
     const targetUrl = new URL(rawPath, targetOrigin)
 
     const headers = {

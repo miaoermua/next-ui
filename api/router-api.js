@@ -148,17 +148,27 @@ function getRawPathFromRequest(req) {
     return '/'
   }
 
-  const [pathname = '', query = ''] = originalUrl.split('?')
+  const parsed = new URL(originalUrl, 'http://router-api.local')
+  const queryPath = parsed.searchParams.get('__path')
 
-  let trimmedPath = pathname
+  if (queryPath) {
+    const decodedPath = decodeURIComponent(queryPath)
+    if (decodedPath.startsWith('/')) {
+      return decodedPath
+    }
 
-  if (pathname.startsWith('/api/router-api/')) {
-    trimmedPath = pathname.slice('/api/router-api'.length)
-  } else if (pathname === '/api/router-api') {
+    return `/${decodedPath}`
+  }
+
+  let trimmedPath = parsed.pathname
+
+  if (trimmedPath.startsWith('/api/router-api/')) {
+    trimmedPath = trimmedPath.slice('/api/router-api'.length)
+  } else if (trimmedPath === '/api/router-api') {
     trimmedPath = '/'
-  } else if (pathname.startsWith('/router-api/')) {
-    trimmedPath = pathname.slice('/router-api'.length)
-  } else if (pathname === '/router-api') {
+  } else if (trimmedPath.startsWith('/router-api/')) {
+    trimmedPath = trimmedPath.slice('/router-api'.length)
+  } else if (trimmedPath === '/router-api') {
     trimmedPath = '/'
   }
 
@@ -166,6 +176,7 @@ function getRawPathFromRequest(req) {
     trimmedPath = `/${trimmedPath}`
   }
 
+  const query = parsed.searchParams.toString()
   return query ? `${trimmedPath}?${query}` : trimmedPath
 }
 
@@ -283,6 +294,11 @@ export default function handler(req, res) {
   })
 
   upstreamRequest.on('error', (error) => {
+    const rawMessage = String(error?.message || 'upstream request failed')
+    const friendlyMessage = /ENOTFOUND/i.test(rawMessage)
+      ? `DNS 解析失败（${targetHost}）。请确认域名可被公网解析，且 Vercel 区域可访问。`
+      : rawMessage
+
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' })
     }
@@ -291,7 +307,7 @@ export default function handler(req, res) {
       JSON.stringify({
         ok: false,
         error: 'proxy_error',
-        message: error.message,
+        message: friendlyMessage,
         target: `${targetOrigin}${rawPath}`
       })
     )
