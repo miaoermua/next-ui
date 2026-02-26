@@ -46,6 +46,22 @@ pnpm run dev
 
 默认启动后访问 Vite 提示地址（通常是 `http://localhost:5173`）。
 
+### 2.1) 可选：本地 env 自动登录
+
+可在 `.env.local` 中配置以下变量：
+
+- `VITE_ROUTER_ADDRESS`：路由器地址（支持 `http://` / `https://`）
+- `VITE_ROUTER_PASSWORD`：登录密码
+- `VITE_ROUTER_AUTO_LOGIN`：是否自动登录（可选：`true/false`，默认有密码时自动开启）
+
+示例：
+
+```env
+VITE_ROUTER_ADDRESS=http://10.0.0.4
+VITE_ROUTER_PASSWORD=your_password
+VITE_ROUTER_AUTO_LOGIN=true
+```
+
 ### 3) 构建生产包
 
 ```bash
@@ -65,7 +81,6 @@ pnpm run preview
 - 前端统一请求前缀：`/router-api`
 - 开发代理中间件：`vite.config.js`
 - 生产代理入口：`api/router-api.js`（由 `vercel.json` 将 `/router-api/*` 重写到该函数）
-- 前端会将真实上游路径编码到查询参数 `__path`（例如 `%2Fcgi-bin%2Fluci...`），用于减少外层网关对 `/cgi-bin` 路径关键字的拦截风险
 - 路由器目标由请求头控制：
   - `x-router-host`（例如 `10.0.0.4`）
   - `x-router-scheme`（`http` 或 `https`）

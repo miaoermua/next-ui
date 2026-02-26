@@ -651,7 +651,6 @@ function Devices6Card({ items }) {
             <tr>
               <th className="px-3 py-2 font-medium">主机名</th>
               <th className="px-3 py-2 font-medium">IPv6 地址</th>
-              <th className="px-3 py-2 font-medium">DUID</th>
               <th className="px-3 py-2 font-medium">租约</th>
             </tr>
           </thead>
@@ -665,15 +664,12 @@ function Devices6Card({ items }) {
                   <td className="max-w-[20rem] truncate px-3 py-2" title={item.ip6addr}>
                     {item.ip6addr}
                   </td>
-                  <td className="max-w-[20rem] truncate px-3 py-2" title={item.duid}>
-                    {item.duid}
-                  </td>
                   <td className="px-3 py-2">{item.expires > 0 ? `${Math.floor(item.expires / 60)} 分钟` : '-'}</td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td className="px-3 py-4 text-zinc-500 dark:text-zinc-400" colSpan={4}>
+                <td className="px-3 py-4 text-zinc-500 dark:text-zinc-400" colSpan={3}>
                   暂无 DHCPv6 租约数据。
                 </td>
               </tr>
@@ -813,14 +809,17 @@ function SettingsModal({
             className="space-y-3 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-800"
             onSubmit={onLogin}
           >
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-3">
               <input
                 className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
                 onChange={onCredentialChange('address')}
-                placeholder="路由器地址（如 192.168.1.1）"
+                placeholder="路由器地址（如 http://192.168.1.1）"
                 type="text"
                 value={credentials.address}
               />
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <input
                 autoComplete="current-password"
                 className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
@@ -2297,21 +2296,25 @@ function PlaceholderPage({ title, description }) {
 
 
 function App() {
+  const shouldAutoLogin = ROUTER_DEFAULTS.autoLogin && Boolean(ROUTER_DEFAULTS.password)
   const [activePage, setActivePage] = useState('dashboard')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
   const [authState, setAuthState] = useState(getRouterAuthState())
   const [credentials, setCredentials] = useState({
-    address: authState.address || ROUTER_DEFAULTS.address,
-    password: ''
+    address: ROUTER_DEFAULTS.address || authState.address,
+    password: ROUTER_DEFAULTS.password || ''
   })
   const [authLoading, setAuthLoading] = useState(false)
-  const [authMessage, setAuthMessage] = useState('未登录，请在右上角设置中连接路由器')
+  const [authMessage, setAuthMessage] = useState(
+    shouldAutoLogin ? '检测到本地环境凭据，准备自动登录...' : '未登录，请在右上角设置中连接路由器'
+  )
   const [successToast, setSuccessToast] = useState('')
   const [diagnostics, setDiagnostics] = useState(null)
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false)
   const [hasPromptedLogin, setHasPromptedLogin] = useState(false)
+  const [autoLoginTried, setAutoLoginTried] = useState(!shouldAutoLogin)
   const [systemDark, setSystemDark] = useState(() => {
     try {
       return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
@@ -2335,7 +2338,7 @@ function App() {
   const isDark = theme === 'system' ? systemDark : theme === 'dark'
   const luciQuickUrl = `http://${String(credentials.address || '')
     .replace(/^https?:\/\//i, '')
-    .replace(/\/$/, '')}/cgi-bin/luci?luci_username=root&luci_password=${encodeURIComponent(credentials.password || 'password')}`
+    .replace(/\/$/, '')}/cgi-bin/luci?luci_username=root&luci_password=${encodeURIComponent(credentials.password || '')}`
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark)
@@ -2379,11 +2382,63 @@ function App() {
   }, [successToast])
 
   useEffect(() => {
+    if (autoLoginTried) {
+      return undefined
+    }
+
+    let cancelled = false
+
+    const runAutoLogin = async () => {
+      setAuthLoading(true)
+      setAuthMessage('正在使用本地环境变量自动登录...')
+
+      try {
+        const nextAuthState = setRouterAddress(credentials.address)
+        if (cancelled) {
+          return
+        }
+
+        setAuthState(nextAuthState)
+        const state = await loginRouter('root', credentials.password)
+        if (cancelled) {
+          return
+        }
+
+        setAuthState(state)
+        const suffix = state.warning ? `（注意：${state.warning}）` : ''
+        setAuthMessage(`自动登录成功，已连接 ${state.address}${suffix}`)
+        setSuccessToast(`自动连接成功：${state.address}`)
+      } catch (error) {
+        if (cancelled) {
+          return
+        }
+
+        setAuthMessage(error?.message || '本地环境变量自动登录失败，请手动连接')
+      } finally {
+        if (!cancelled) {
+          setAuthLoading(false)
+          setAutoLoginTried(true)
+        }
+      }
+    }
+
+    runAutoLogin()
+
+    return () => {
+      cancelled = true
+    }
+  }, [autoLoginTried, credentials.address, credentials.password])
+
+  useEffect(() => {
+    if (!autoLoginTried) {
+      return
+    }
+
     if ((!authState.authenticated || !authState.luciAuthenticated) && !hasPromptedLogin) {
       setSettingsOpen(true)
       setHasPromptedLogin(true)
     }
-  }, [authState.authenticated, authState.luciAuthenticated, hasPromptedLogin])
+  }, [authState.authenticated, authState.luciAuthenticated, hasPromptedLogin, autoLoginTried])
 
   const handleAuthInput = (field) => (event) => {
     setCredentials((previous) => ({

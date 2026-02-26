@@ -71,8 +71,7 @@ function normalizeRouterAddress(address) {
 
 function resolveApiUrl(url) {
   const normalizedPath = url.startsWith('/') ? url : `/${url}`
-  const encodedPath = encodeURIComponent(normalizedPath)
-  return `/router-api?__path=${encodedPath}`
+  return `/router-api${normalizedPath}`
 }
 
 function resolveLuciPath(path) {
@@ -205,13 +204,7 @@ async function fetchMaybeJson(url, init) {
   const request = await performRequest(url, init)
 
   if (!request.response.ok) {
-    const body = request.body
-    const messageFromBody =
-      (body && typeof body === 'object' && (body.message || body.error)) ||
-      (typeof body === 'string' ? body.trim() : '')
-
-    const suffix = messageFromBody ? `: ${String(messageFromBody).slice(0, 220)}` : ''
-    throw new Error(`HTTP ${request.response.status} @ ${request.targetUrl}${suffix}`)
+    throw new Error(`HTTP ${request.response.status} @ ${request.targetUrl}`)
   }
 
   return request.body
@@ -768,12 +761,29 @@ function normalizeLease6Item(item, index) {
     .trim()
 
   return {
-    id: `${ip6addr || item.duid || 'lease6'}-${index}`,
+    id: `${ip6addr || item.hostname || 'lease6'}-${index}`,
     hostname: item.hostname ? String(item.hostname) : '-',
     ip6addr: ip6addr || '-',
-    duid: item.duid ? String(item.duid) : '-',
     expires: Number(item.expires) || 0
   }
+}
+
+function parseBooleanEnv(value, fallback) {
+  const text = String(value || '').trim().toLowerCase()
+
+  if (!text) {
+    return fallback
+  }
+
+  if (['1', 'true', 'yes', 'on'].includes(text)) {
+    return true
+  }
+
+  if (['0', 'false', 'no', 'off'].includes(text)) {
+    return false
+  }
+
+  return fallback
 }
 
 function normalizeOverviewRates(payload) {
@@ -1473,8 +1483,21 @@ async function loginUbus(username, password) {
     throw new Error('登录失败（ubus error）')
   }
 
-  if (!Array.isArray(payload?.result) || payload.result[0] !== 0 || !payload.result[1]?.ubus_rpc_session) {
-    throw new Error('登录失败（ubus result）')
+  if (!Array.isArray(payload?.result)) {
+    throw new Error('登录失败（ubus 返回格式异常）')
+  }
+
+  const ubusCode = Number(payload.result[0])
+  if (ubusCode !== 0) {
+    if (ubusCode === 6) {
+      throw new Error('登录失败：用户名或密码错误（ubus code 6）')
+    }
+
+    throw new Error(`登录失败（ubus code ${ubusCode}）`)
+  }
+
+  if (!payload.result[1]?.ubus_rpc_session) {
+    throw new Error('登录失败（ubus 未返回会话）')
   }
 
   runtimeUbusSession = payload.result[1].ubus_rpc_session
@@ -1630,8 +1653,17 @@ export async function diagnoseRouterConnection(options = {}) {
 }
 
 export function getRouterDefaults() {
+  const envAddress = String(import.meta.env.VITE_ROUTER_ADDRESS || '').trim()
+  const envPassword = String(import.meta.env.VITE_ROUTER_PASSWORD || '')
+  const normalizedAddress = normalizeRouterAddress(envAddress)
+  const hasCredential = Boolean(envPassword)
+
   return {
-    address: `${DEFAULT_ROUTER_SCHEME}://${DEFAULT_ROUTER_ADDRESS}`
+    address: normalizedAddress.valid
+      ? `${normalizedAddress.scheme}://${normalizedAddress.address}`
+      : `${DEFAULT_ROUTER_SCHEME}://${DEFAULT_ROUTER_ADDRESS}`,
+    password: envPassword,
+    autoLogin: parseBooleanEnv(import.meta.env.VITE_ROUTER_AUTO_LOGIN, hasCredential)
   }
 }
 

@@ -54,18 +54,29 @@ function rewriteSetCookie(cookie, proxyBasePath = '/router-api') {
   return rewritten.join('; ')
 }
 
-function resolveRawPathFromProxyUrl(url) {
-  const parsed = new URL(url, 'http://router-api.local')
-  const queryPath = parsed.searchParams.get('__path')
-
-  if (queryPath) {
-    const decodedPath = decodeURIComponent(queryPath)
-    return decodedPath.startsWith('/') ? decodedPath : `/${decodedPath}`
+function normalizeRawPath(path) {
+  const text = String(path || '').trim()
+  if (!text) {
+    return '/'
   }
 
-  const pathname = parsed.pathname.replace(/^\/router-api/, '') || '/'
+  return text.startsWith('/') ? text : `/${text}`
+}
+
+function getRawPathFromProxyUrl(url, proxyBasePath = '/router-api') {
+  const parsed = new URL(String(url || ''), 'http://localhost')
+
+  let trimmedPath = parsed.pathname
+  if (trimmedPath.startsWith(`${proxyBasePath}/`)) {
+    trimmedPath = trimmedPath.slice(proxyBasePath.length)
+  } else if (trimmedPath === proxyBasePath) {
+    trimmedPath = '/'
+  }
+
+  const normalizedPath = normalizeRawPath(trimmedPath)
   const query = parsed.searchParams.toString()
-  return query ? `${pathname}?${query}` : pathname
+
+  return query ? `${normalizedPath}?${query}` : normalizedPath
 }
 
 function createRouterApiMiddleware() {
@@ -80,7 +91,7 @@ function createRouterApiMiddleware() {
     const targetScheme = sanitizeSchemeValue(req.headers['x-router-scheme'], 'http')
     const targetOrigin = `${targetScheme}://${targetHost}`
 
-    const rawPath = resolveRawPathFromProxyUrl(req.url)
+    const rawPath = getRawPathFromProxyUrl(req.url, '/router-api')
     const targetUrl = new URL(rawPath, targetOrigin)
 
     const headers = {
