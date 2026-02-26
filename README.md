@@ -60,10 +60,11 @@ pnpm run preview
 
 ## 代理与请求机制
 
-本项目没有独立后端，开发逆向 LuCI 时通过 Vite 中间件代理路由器请求。
+本项目没有独立常驻后端，开发环境通过 Vite 中间件代理路由器请求，生产（Vercel）通过 Serverless Function 代理。
 
 - 前端统一请求前缀：`/router-api`
-- 代理中间件文件：`vite.config.js`
+- 开发代理中间件：`vite.config.js`
+- 生产代理入口：`api/router-api.js`（由 `vercel.json` 将 `/router-api/*` 重写到该函数）
 - 路由器目标由请求头控制：
   - `x-router-host`（例如 `10.0.0.4`）
   - `x-router-scheme`（`http` 或 `https`）
@@ -118,4 +119,3 @@ vite.config.js      # 开发代理与 Preact 配置
 4. 缓存结果
 
 如果固件裁剪较多、`file` 相关 ubus 能力被禁用，可能退化为较少信息。
-
