@@ -204,7 +204,13 @@ async function fetchMaybeJson(url, init) {
   const request = await performRequest(url, init)
 
   if (!request.response.ok) {
-    throw new Error(`HTTP ${request.response.status} @ ${request.targetUrl}`)
+    const body = request.body
+    const messageFromBody =
+      (body && typeof body === 'object' && (body.message || body.error)) ||
+      (typeof body === 'string' ? body.trim() : '')
+
+    const suffix = messageFromBody ? `: ${String(messageFromBody).slice(0, 220)}` : ''
+    throw new Error(`HTTP ${request.response.status} @ ${request.targetUrl}${suffix}`)
   }
 
   return request.body

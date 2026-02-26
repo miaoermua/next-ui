@@ -1,6 +1,8 @@
 import http from 'node:http'
 import https from 'node:https'
 
+const UPSTREAM_TIMEOUT_MS = 10_000
+
 function sanitizeTargetValue(value, fallback) {
   const text = String(value || '').trim()
   if (!text) {
@@ -18,6 +20,93 @@ function sanitizeTargetValue(value, fallback) {
 function sanitizeSchemeValue(value, fallback = 'http') {
   const normalized = String(value || '').toLowerCase()
   return normalized === 'https' ? 'https' : fallback
+}
+
+function stripPort(host) {
+  const value = String(host || '').trim()
+
+  if (!value) {
+    return ''
+  }
+
+  if (value.startsWith('[')) {
+    const end = value.indexOf(']')
+    if (end > 0) {
+      return value.slice(1, end)
+    }
+  }
+
+  const colonCount = (value.match(/:/g) || []).length
+  if (colonCount === 1 && value.includes(':')) {
+    return value.split(':')[0]
+  }
+
+  return value
+}
+
+function isPrivateIpv4(host) {
+  if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) {
+    return false
+  }
+
+  const parts = host.split('.').map((item) => Number(item))
+  if (parts.some((item) => Number.isNaN(item) || item < 0 || item > 255)) {
+    return false
+  }
+
+  if (parts[0] === 10) {
+    return true
+  }
+
+  if (parts[0] === 127) {
+    return true
+  }
+
+  if (parts[0] === 192 && parts[1] === 168) {
+    return true
+  }
+
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) {
+    return true
+  }
+
+  if (parts[0] === 169 && parts[1] === 254) {
+    return true
+  }
+
+  return false
+}
+
+function isPrivateIpv6(host) {
+  const normalized = host.toLowerCase()
+
+  if (normalized === '::1') {
+    return true
+  }
+
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) {
+    return true
+  }
+
+  return normalized.startsWith('fe8') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb')
+}
+
+function isPrivateTargetHost(targetHost) {
+  const host = stripPort(targetHost).toLowerCase()
+
+  if (!host) {
+    return false
+  }
+
+  if (host === 'localhost' || host.endsWith('.local')) {
+    return true
+  }
+
+  if (host.includes(':')) {
+    return isPrivateIpv6(host)
+  }
+
+  return isPrivateIpv4(host)
 }
 
 function rewriteSetCookie(cookie, proxyBasePath = '/router-api') {
@@ -123,6 +212,20 @@ export default function handler(req, res) {
   const targetScheme = sanitizeSchemeValue(req.headers['x-router-scheme'], 'http')
   const targetOrigin = `${targetScheme}://${targetHost}`
 
+  if (process.env.VERCEL && isPrivateTargetHost(targetHost)) {
+    res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' })
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error: 'private_target_not_reachable',
+        message:
+          '当前服务部署在 Vercel，无法直接访问 10.x/172.16-31.x/192.168.x 等内网地址。请改用公网可达域名，或把前端部署到与路由器同一内网。',
+        target: targetOrigin
+      })
+    )
+    return
+  }
+
   const rawPath = getRawPathFromRequest(req)
   const targetUrl = new URL(rawPath, targetOrigin)
 
@@ -174,6 +277,10 @@ export default function handler(req, res) {
       upstreamResponse.pipe(res)
     }
   )
+
+  upstreamRequest.setTimeout(UPSTREAM_TIMEOUT_MS, () => {
+    upstreamRequest.destroy(new Error(`upstream timeout after ${UPSTREAM_TIMEOUT_MS}ms`))
+  })
 
   upstreamRequest.on('error', (error) => {
     if (!res.headersSent) {
