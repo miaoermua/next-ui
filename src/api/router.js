@@ -4,19 +4,19 @@ const REALTIME_BANDWIDTH_PATH = '/admin/status/realtime/bandwidth/'
 const PROCESSES_PATH = '/admin/status/processes'
 const STARTUP_PATH = '/admin/system/startup'
 const PACKAGES_PATH = '/admin/system/packages?display=installed'
-const OVERVIEW_STATUS_PATH = '/admin/status/overview?status=1'
-const IFACE_STATUS_PATH = '/admin/network/iface_status/EasyTier,Hotspot,lan,tailscale,wan,wan6'
 const NETWORK_LAN_PATH = '/admin/network/network/lan'
 const NETWORK_WAN_PATH = '/admin/network/network/wan'
 const NETWORK_DHCP_PATH = '/admin/network/dhcp'
-const OPENCLASH_TOOLBAR_PATH = '/admin/services/openclash/toolbar_show'
 const OPENCLASH_SETTINGS_PATH = '/admin/services/openclash/settings/'
 const ADGUARD_HOME_PATH = '/admin/services/AdGuardHome'
-const ADGUARD_HOME_STATUS_PATH = '/admin/services/AdGuardHome/status'
 const DDNS_GO_PATH = '/admin/services/ddns-go'
-const DDNS_GO_STATUS_PATH = '/admin/services/ddnsgo_status'
 const APPFILTER_OAF_STATUS_PATH = '/admin/network/get_oaf_status'
 const APPFILTER_BASE_PATH = '/admin/network/get_app_filter_base'
+const OVERVIEW_STATUS_PATH = '/admin/status/overview?status=1'
+const IFACE_STATUS_PATH = '/admin/network/iface_status/EasyTier,Hotspot,lan,tailscale,wan,wan6'
+const OPENCLASH_TOOLBAR_PATH = '/admin/services/openclash/toolbar_show'
+const ADGUARD_HOME_STATUS_PATH = '/admin/services/AdGuardHome/status'
+const DDNS_GO_STATUS_PATH = '/admin/services/ddnsgo_status'
 const DEFAULT_ROUTER_ADDRESS = '192.168.1.1'
 const DEFAULT_ROUTER_SCHEME = 'http'
 
@@ -31,6 +31,7 @@ let runtimeBoardInfoCache = null
 let runtimeCpuModelCache = null
 let runtimeCpuModelProbeAttempted = false
 let runtimeOverviewPageMetaCache = null
+let runtimeUbusAvailable = true
 
 function normalizeRouterAddress(address) {
   const text = String(address || '').trim().replace(/\/$/, '')
@@ -90,6 +91,27 @@ function buildRouterHeaders(extraHeaders = {}) {
     'x-router-host': runtimeRouterAddress,
     'x-router-scheme': runtimeRouterScheme,
     ...extraHeaders
+  }
+}
+
+
+function isAccessDeniedError(error) {
+  const message = String(error?.message || '').toLowerCase()
+  return message.includes('access denied') || message.includes('ubus unavailable') || message.includes('ubus result failed') || message.includes('ubus error')
+}
+
+const fallbackLogCache = new Set()
+
+function logUbusFallback(scope, reason) {
+  const key = `${scope}|${reason}`
+  if (fallbackLogCache.has(key)) {
+    return
+  }
+
+  fallbackLogCache.add(key)
+
+  if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+    console.warn(`[RouterAPI] UBUS fallback: ${scope} -> ${reason}`)
   }
 }
 
@@ -1448,6 +1470,10 @@ function parseNetworkInterfaceMetaFromHtml(html, iface) {
 }
 
 async function callUbus(object, method, data = {}) {
+  if (!runtimeUbusAvailable) {
+    throw new Error('ubus unavailable: access denied')
+  }
+
   const payload = await fetchMaybeJson('/ubus', {
     method: 'POST',
     headers: {
@@ -1462,13 +1488,23 @@ async function callUbus(object, method, data = {}) {
   })
 
   if (payload?.error) {
+    if (Number(payload.error.code) === -32002) {
+      runtimeUbusAvailable = false
+      throw new Error('ubus access denied')
+    }
     throw new Error(`ubus error: ${payload.error.code}`)
   }
 
   if (!Array.isArray(payload?.result) || payload.result[0] !== 0) {
+    const ubusCode = Array.isArray(payload?.result) ? Number(payload.result[0]) : NaN
+    if (ubusCode === 6) {
+      runtimeUbusAvailable = false
+      throw new Error('ubus access denied')
+    }
     throw new Error('ubus result failed')
   }
 
+  runtimeUbusAvailable = true
   return payload.result[1] || {}
 }
 
@@ -1490,6 +1526,7 @@ export function resetRouterAuth() {
   runtimeCpuModelCache = null
   runtimeCpuModelProbeAttempted = false
   runtimeOverviewPageMetaCache = null
+  runtimeUbusAvailable = true
 }
 
 export function setRouterAddress(address) {
@@ -1514,6 +1551,7 @@ export function setRouterAddress(address) {
     runtimeCpuModelCache = null
     runtimeCpuModelProbeAttempted = false
     runtimeOverviewPageMetaCache = null
+    runtimeUbusAvailable = true
   }
 
   return getRouterAuthState()
@@ -1555,7 +1593,9 @@ async function loginUbus(username, password) {
   }
 
   runtimeUbusSession = payload.result[1].ubus_rpc_session
+  runtimeUbusAvailable = true
 }
+
 
 async function loginLuci(username, password) {
   const body = new URLSearchParams({
@@ -1768,6 +1808,9 @@ export async function fetchSystemSnapshot(cpuCoresGuess = 4) {
   }
 }
 
+/**
+ * Data source: HTML (LuCI `/admin/status/processes`)
+ */
 export async function fetchTopProcesses() {
   const payload = await fetchMaybeJson(resolveLuciPath(PROCESSES_PATH))
   const parsed = parseProcessPayload(payload)
@@ -1795,6 +1838,96 @@ export async function fetchTopProcesses() {
   }
 }
 
+
+
+function normalizeInterfaceStatusFromIfaceStatus(target, iface) {
+  return {
+    id: target?.id || iface,
+    name: target?.name || iface,
+    ifname: target?.ifname || '-',
+    isUp: Boolean(target?.is_up),
+    rxBytes: Number(target?.rx_bytes) || 0,
+    txBytes: Number(target?.tx_bytes) || 0,
+    rxPackets: Number(target?.rx_packets) || 0,
+    txPackets: Number(target?.tx_packets) || 0,
+    uptime: Number(target?.uptime) || 0,
+    proto: target?.proto || '',
+    ip4addrs: extractIpList(target?.ipaddrs || target?.ipv4_addresses || target?.ipv4),
+    ip6addrs: extractIpList(target?.ip6addrs || target?.ipv6_addresses || target?.ipv6),
+    ip6prefix: target?.ip6prefix ? String(target.ip6prefix) : '',
+    sampledAt: Date.now()
+  }
+}
+
+function normalizeInterfaceStatusFromUbus(target, iface) {
+  return {
+    id: iface,
+    name: iface,
+    ifname: target?.l3_device || target?.device || iface,
+    isUp: Boolean(target?.up),
+    rxBytes: Number(target?.statistics?.rx_bytes) || 0,
+    txBytes: Number(target?.statistics?.tx_bytes) || 0,
+    rxPackets: Number(target?.statistics?.rx_packets) || 0,
+    txPackets: Number(target?.statistics?.tx_packets) || 0,
+    uptime: Number(target?.uptime) || 0,
+    proto: String(target?.proto || ''),
+    ip4addrs: extractIpList(target?.['ipv4-address']),
+    ip6addrs: extractIpList(target?.['ipv6-address']),
+    ip6prefix: Array.isArray(target?.['ipv6-prefix']) && target['ipv6-prefix'][0]?.address
+      ? String(target['ipv6-prefix'][0].address)
+      : '',
+    sampledAt: Date.now()
+  }
+}
+
+function parseDdnsGoConfigFromUci(payload) {
+  const values = payload?.values && typeof payload.values === 'object' ? payload.values : payload || {}
+  const enabledValue = String(values.enable ?? values.enabled ?? '').trim()
+  const skipVerifyValue = String(values.skip_verify ?? values.skipverify ?? '').trim()
+  const noWebValue = String(values.noweb ?? values.no_web ?? '').trim()
+
+  return {
+    enabled: enabledValue === '1' || enabledValue.toLowerCase() === 'true',
+    port: String(values.port || '-'),
+    updateInterval: String(values.time || values.interval || '-'),
+    compareTimes: String(values.ctimes || '-'),
+    skipVerify: skipVerifyValue === '1' || skipVerifyValue.toLowerCase() === 'true',
+    dnsServer: String(values.dns || '-'),
+    noWeb: noWebValue === '1' || noWebValue.toLowerCase() === 'true',
+    delay: String(values.delay || '0'),
+    description: ''
+  }
+}
+
+function parseAdGuardHomeConfigFromUci(payload) {
+  const values = payload?.values && typeof payload.values === 'object' ? payload.values : payload || {}
+  const enabledValue = String(values.enabled ?? values.enable ?? '').trim()
+  const verboseValue = String(values.verbose ?? '').trim()
+  const waitOnBootValue = String(values.waitonboot ?? values.restartonboot ?? '').trim()
+
+  return {
+    enabled: enabledValue === '1' || enabledValue.toLowerCase() === 'true',
+    httpPort: String(values.httpport || values.port || '-'),
+    redirectMode: String(values.redirect || '-'),
+    binPath: String(values.binpath || '/usr/bin/AdGuardHome/AdGuardHome'),
+    configPath: String(values.configpath || '/etc/AdGuardHome.yaml'),
+    workDir: String(values.workdir || '/usr/bin/AdGuardHome'),
+    logFile: String(values.logfile || '/tmp/AdGuardHome.log'),
+    verbose: verboseValue === '1' || verboseValue.toLowerCase() === 'true',
+    waitOnBoot: waitOnBootValue === '1' || waitOnBootValue.toLowerCase() === 'true',
+    backupFiles: Array.isArray(values.backupfile)
+      ? values.backupfile
+      : typeof values.backupfile === 'string' && values.backupfile.trim()
+        ? values.backupfile.split(/[\s,\/]+/).filter(Boolean)
+        : [],
+    backupWorkDirPath: String(values.backupwdpath || values.workdir || '/usr/bin/AdGuardHome'),
+    coreVersion: '-'
+  }
+}
+
+/**
+ * Data source: LuCI JSON (`/admin/status/overview?status=1`) + UBUS (`system.board`)
+ */
 export async function fetchOverviewStatus() {
   const payload = await fetchMaybeJson(resolveLuciPath(OVERVIEW_STATUS_PATH))
 
@@ -1908,27 +2041,60 @@ export async function fetchOverviewStatus() {
   }
 }
 
+/**
+ * Data source: UBUS preferred (`network.interface.wan/wan6 status`), fallback LuCI iface_status
+ */
 export async function fetchIfaceTrafficRates() {
-  const payload = await fetchMaybeJson(resolveLuciPath(IFACE_STATUS_PATH))
+  let wanStatus = null
+  let wan6Status = null
 
-  if (!Array.isArray(payload)) {
-    throw new Error('iface_status 返回格式无效')
+  try {
+    ;[wanStatus, wan6Status] = await Promise.all([
+      callUbus('network.interface.wan', 'status').catch(() => null),
+      callUbus('network.interface.wan6', 'status').catch(() => null)
+    ])
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
   }
 
-  const wan = findInterfaceById(payload, 'wan')
-  const wan6 = findInterfaceById(payload, 'wan6')
+  if (!wanStatus && !wan6Status) {
+    logUbusFallback('fetchIfaceTrafficRates', 'network.interface access denied, fallback to /admin/network/iface_status')
+    const payload = await fetchMaybeJson(resolveLuciPath(IFACE_STATUS_PATH))
 
-  if (!wan && !wan6) {
-    throw new Error('未找到 wan/wan6 接口')
+    if (!Array.isArray(payload)) {
+      throw new Error('iface_status 返回格式无效')
+    }
+
+    const wan = findInterfaceById(payload, 'wan')
+    const wan6 = findInterfaceById(payload, 'wan6')
+
+    if (!wan && !wan6) {
+      throw new Error('未找到 wan/wan6 接口')
+    }
+
+    wanStatus = {
+      statistics: {
+        rx_bytes: Number(wan?.rx_bytes) || 0,
+        tx_bytes: Number(wan?.tx_bytes) || 0
+      }
+    }
+    wan6Status = {
+      statistics: {
+        rx_bytes: Number(wan6?.rx_bytes) || 0,
+        tx_bytes: Number(wan6?.tx_bytes) || 0
+      }
+    }
   }
 
   const now = Date.now()
   const sample = {
     ts: now,
-    wanRx: Number(wan?.rx_bytes) || 0,
-    wanTx: Number(wan?.tx_bytes) || 0,
-    wan6Rx: Number(wan6?.rx_bytes) || 0,
-    wan6Tx: Number(wan6?.tx_bytes) || 0
+    wanRx: Number(wanStatus?.statistics?.rx_bytes) || 0,
+    wanTx: Number(wanStatus?.statistics?.tx_bytes) || 0,
+    wan6Rx: Number(wan6Status?.statistics?.rx_bytes) || 0,
+    wan6Tx: Number(wan6Status?.statistics?.tx_bytes) || 0
   }
 
   if (!previousIfaceTrafficSample) {
@@ -1960,33 +2126,101 @@ export async function fetchIfaceTrafficRates() {
   }
 }
 
+/**
+ * Data source: UBUS preferred (`rc list`), fallback HTML (`/admin/system/startup`)
+ */
 export async function fetchStartupEntries(limit = 30) {
-  const payload = await fetchMaybeJson(resolveLuciPath(STARTUP_PATH))
-  const entries = parseStartupEntriesFromHtml(payload)
+  try {
+    const payload = await callUbus('rc', 'list', {})
+    const inits = payload?.inits && typeof payload.inits === 'object' ? payload.inits : {}
 
-  if (!entries.length) {
-    throw new Error('无法解析启动项列表')
-  }
-
-  const sorted = [...entries]
-    .sort((a, b) => {
-      if (a.priority !== b.priority) {
-        return a.priority - b.priority
+    const entries = Object.keys(inits).map((name, index) => {
+      const item = inits[name] || {}
+      return {
+        id: `${name}-${index}`,
+        name,
+        priority: Number(item.start ?? item.index ?? 0) || 0,
+        enabled: item.enabled ? '已启用' : '未启用',
+        script: String(item.script || `/etc/init.d/${name}`)
       }
-
-      return a.name.localeCompare(b.name)
     })
-    .slice(0, limit)
 
-  return {
-    items: sorted,
-    sampledAt: Date.now()
+    const sorted = entries
+      .sort((a, b) => {
+        if (a.priority !== b.priority) {
+          return a.priority - b.priority
+        }
+        return a.name.localeCompare(b.name)
+      })
+      .slice(0, limit)
+
+    return {
+      items: sorted,
+      sampledAt: Date.now()
+    }
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
+
+    logUbusFallback('fetchStartupEntries', 'rc.list access denied, fallback to /admin/system/startup HTML')
+    const payload = await fetchMaybeJson(resolveLuciPath(STARTUP_PATH))
+    const entries = parseStartupEntriesFromHtml(payload)
+
+    if (!entries.length) {
+      throw new Error('无法解析启动项列表')
+    }
+
+    const sorted = [...entries]
+      .sort((a, b) => {
+        if (a.priority !== b.priority) {
+          return a.priority - b.priority
+        }
+
+        return a.name.localeCompare(b.name)
+      })
+      .slice(0, limit)
+
+    return {
+      items: sorted,
+      sampledAt: Date.now()
+    }
   }
 }
 
+/**
+ * Data source: UBUS preferred (`file.exec` + `opkg list-installed`), fallback HTML packages page
+ */
 export async function fetchInstalledPackages(limit = 2000) {
-  const payload = await fetchMaybeJson(resolveLuciPath(PACKAGES_PATH))
-  const items = parseInstalledPackageRowsFromHtml(payload)
+  const payload = await callUbus('file', 'exec', {
+    command: '/bin/sh',
+    params: ['-c', 'opkg list-installed 2>/dev/null || opkg list-installed']
+  })
+
+  const stdout = String(payload?.stdout || '')
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  const items = lines.map((line, index) => {
+    const dashIndex = line.indexOf(' - ')
+    if (dashIndex <= 0) {
+      return null
+    }
+
+    const name = line.slice(0, dashIndex).trim()
+    const version = line.slice(dashIndex + 3).trim()
+    if (!name) {
+      return null
+    }
+
+    return {
+      id: `${name}-${index}`,
+      name,
+      version: version || '-'
+    }
+  }).filter(Boolean)
 
   if (!items.length) {
     throw new Error('无法解析已安装软件包列表')
@@ -1996,10 +2230,11 @@ export async function fetchInstalledPackages(limit = 2000) {
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true }))
     .slice(0, limit)
 
-  const meta = parsePackagePageMetaFromHtml(payload)
-
   return {
-    ...meta,
+    listHint: '来自 opkg list-installed',
+    freeSpacePercent: '',
+    freeSpacePercentValue: 0,
+    freeSpaceText: '',
     total: items.length,
     truncated: items.length > limit,
     items: sorted,
@@ -2007,26 +2242,88 @@ export async function fetchInstalledPackages(limit = 2000) {
   }
 }
 
+/**
+ * Data source: UBUS preferred (`system.info`), fallback HTML packages page
+ */
 export async function fetchPackagesStorageMeta() {
-  const payload = await fetchMaybeJson(resolveLuciPath(PACKAGES_PATH))
-  const meta = parsePackagePageMetaFromHtml(payload)
+  try {
+    const info = await callUbus('system', 'info')
+    const root = info?.root && typeof info.root === 'object' ? info.root : {}
 
-  return {
-    ...meta,
-    sampledAt: Date.now()
+    const total = Number(root.total) || 0
+    const free = Number(root.free) || 0
+    const freeSpacePercentValue = total > 0 ? clamp(Math.round((free / total) * 100), 0, 100) : 0
+
+    return {
+      listHint: '来自 system.info.root',
+      freeSpacePercent: `${freeSpacePercentValue}%`,
+      freeSpacePercentValue,
+      freeSpaceText: `${formatBytes(free * 1024)} / ${formatBytes(total * 1024)}`,
+      sampledAt: Date.now()
+    }
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
+
+    logUbusFallback('fetchPackagesStorageMeta', 'system.info access denied, fallback to packages HTML meta')
+    const payload = await fetchMaybeJson(resolveLuciPath(PACKAGES_PATH))
+    const meta = parsePackagePageMetaFromHtml(payload)
+
+    return {
+      ...meta,
+      sampledAt: Date.now()
+    }
   }
 }
 
+/**
+ * Data source: UBUS preferred (`uci get network.lan`), fallback HTML network/lan
+ */
 export async function fetchNetworkLanConfig() {
-  const payload = await fetchMaybeJson(resolveLuciPath(NETWORK_LAN_PATH))
-  const parsed = parseNetworkInterfaceMetaFromHtml(payload, 'lan')
+  try {
+    const payload = await callUbus('uci', 'get', {
+      config: 'network',
+      section: 'lan'
+    })
 
-  return {
-    ...parsed,
-    sampledAt: Date.now()
+    const values = payload?.values && typeof payload.values === 'object' ? payload.values : {}
+
+    return {
+      protocol: String(values.proto || '-'),
+      ipv4: String(values.ipaddr || '-'),
+      netmask: String(values.netmask || '-'),
+      gateway: String(values.gateway || '-'),
+      dns: Array.isArray(values.dns)
+        ? values.dns.map((item) => String(item || '').trim()).filter(Boolean)
+        : typeof values.dns === 'string' && values.dns.trim()
+          ? values.dns.split(/[\s,]+/).filter(Boolean)
+          : [],
+      ipv6assign: String(values.ip6assign || '-'),
+      pppoeUsername: '-',
+      pppoePasswordMasked: '-',
+      mtu: String(values.mtu || '-'),
+      sampledAt: Date.now()
+    }
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
+
+    logUbusFallback('fetchNetworkLanConfig', 'uci.get network.lan access denied, fallback to network/lan HTML')
+    const payload = await fetchMaybeJson(resolveLuciPath(NETWORK_LAN_PATH))
+    const parsed = parseNetworkInterfaceMetaFromHtml(payload, 'lan')
+
+    return {
+      ...parsed,
+      sampledAt: Date.now()
+    }
   }
 }
 
+/**
+ * Data source: UBUS preferred (`network.interface.<iface> status`), fallback LuCI iface_status
+ */
 export async function fetchInterfaceStatusByName(ifaceName) {
   const iface = String(ifaceName || '').trim()
 
@@ -2034,32 +2331,29 @@ export async function fetchInterfaceStatusByName(ifaceName) {
     throw new Error('接口名称不能为空')
   }
 
-  const payload = await fetchMaybeJson(resolveLuciPath(`/admin/network/iface_status/${encodeURIComponent(iface)}`))
+  try {
+    const payload = await callUbus(`network.interface.${iface}`, 'status')
+    return normalizeInterfaceStatusFromUbus(payload, iface)
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
 
-  if (!Array.isArray(payload) || payload.length === 0) {
-    throw new Error(`未找到接口状态：${iface}`)
-  }
+    logUbusFallback('fetchInterfaceStatusByName', `network.interface.${iface} access denied, fallback to iface_status`)
+    const payload = await fetchMaybeJson(resolveLuciPath(`/admin/network/iface_status/${encodeURIComponent(iface)}`))
 
-  const target = findInterfaceById(payload, iface) || payload[0]
+    if (!Array.isArray(payload) || payload.length === 0) {
+      throw new Error(`未找到接口状态：${iface}`)
+    }
 
-  return {
-    id: target?.id || iface,
-    name: target?.name || iface,
-    ifname: target?.ifname || '-',
-    isUp: Boolean(target?.is_up),
-    rxBytes: Number(target?.rx_bytes) || 0,
-    txBytes: Number(target?.tx_bytes) || 0,
-    rxPackets: Number(target?.rx_packets) || 0,
-    txPackets: Number(target?.tx_packets) || 0,
-    uptime: Number(target?.uptime) || 0,
-    proto: target?.proto || '',
-    ip4addrs: extractIpList(target?.ipaddrs || target?.ipv4_addresses || target?.ipv4),
-    ip6addrs: extractIpList(target?.ip6addrs || target?.ipv6_addresses || target?.ipv6),
-    ip6prefix: target?.ip6prefix ? String(target.ip6prefix) : '',
-    sampledAt: Date.now()
+    const target = findInterfaceById(payload, iface) || payload[0]
+    return normalizeInterfaceStatusFromIfaceStatus(target, iface)
   }
 }
 
+/**
+ * Data source: UBUS preferred (`network.interface.<iface> status`), fallback LuCI iface_status
+ */
 export async function fetchInterfaceStatusBatch(ifaceNames = []) {
   const names = Array.from(
     new Set(
@@ -2073,6 +2367,26 @@ export async function fetchInterfaceStatusBatch(ifaceNames = []) {
     return []
   }
 
+  try {
+    const statuses = await Promise.all(
+      names.map((iface) =>
+        callUbus(`network.interface.${iface}`, 'status')
+          .then((payload) => normalizeInterfaceStatusFromUbus(payload, iface))
+          .catch(() => null)
+      )
+    )
+
+    const filtered = statuses.filter(Boolean)
+    if (filtered.length) {
+      return filtered
+    }
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
+  }
+
+  logUbusFallback('fetchInterfaceStatusBatch', 'network.interface.* access denied, fallback to iface_status batch')
   const payload = await fetchMaybeJson(resolveLuciPath(`/admin/network/iface_status/${names.join(',')}`))
 
   if (!Array.isArray(payload)) {
@@ -2085,27 +2399,14 @@ export async function fetchInterfaceStatusBatch(ifaceNames = []) {
       if (!target) {
         return null
       }
-
-      return {
-        id: target?.id || iface,
-        name: target?.name || iface,
-        ifname: target?.ifname || '-',
-        isUp: Boolean(target?.is_up),
-        rxBytes: Number(target?.rx_bytes) || 0,
-        txBytes: Number(target?.tx_bytes) || 0,
-        rxPackets: Number(target?.rx_packets) || 0,
-        txPackets: Number(target?.tx_packets) || 0,
-        uptime: Number(target?.uptime) || 0,
-        proto: target?.proto || '',
-        ip4addrs: extractIpList(target?.ipaddrs || target?.ipv4_addresses || target?.ipv4),
-        ip6addrs: extractIpList(target?.ip6addrs || target?.ipv6_addresses || target?.ipv6),
-        ip6prefix: target?.ip6prefix ? String(target.ip6prefix) : '',
-        sampledAt: Date.now()
-      }
+      return normalizeInterfaceStatusFromIfaceStatus(target, iface)
     })
     .filter(Boolean)
 }
 
+/**
+ * Data source: LuCI JSON (`/admin/services/openclash/toolbar_show`)
+ */
 export async function fetchOpenClashToolbarStatus() {
   const payload = await fetchMaybeJson(resolveLuciPath(`${OPENCLASH_TOOLBAR_PATH}?_=${Math.random()}`))
 
@@ -2132,65 +2433,195 @@ export async function fetchOpenClashToolbarStatus() {
 }
 
 
+/**
+ * Data source: UBUS preferred (`uci get openclash.config`), fallback HTML openclash settings
+ */
 export async function fetchOpenClashSettings() {
-  const payload = await fetchMaybeJson(resolveLuciPath(OPENCLASH_SETTINGS_PATH))
-  const parsed = parseOpenClashSettingsFromHtml(payload)
+  try {
+    const payload = await callUbus('uci', 'get', {
+      config: 'openclash',
+      section: 'config'
+    })
 
-  return {
-    ...parsed,
-    sampledAt: Date.now()
+    const values = payload?.values && typeof payload.values === 'object' ? payload.values : {}
+    const ssl = String(values.dashboard_forward_ssl ?? '').trim().toLowerCase()
+
+    return {
+      dashboardPort: String(values.cn_port || '-'),
+      dashboardSecret: String(values.dashboard_password || ''),
+      dashboardForwardDomain: String(values.dashboard_forward_domain || ''),
+      dashboardForwardPort: String(values.dashboard_forward_port || ''),
+      dashboardForwardSsl: ssl === '1' || ssl === 'true' || ssl === 'yes' || ssl === 'on',
+      sampledAt: Date.now()
+    }
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
+
+    logUbusFallback('fetchOpenClashSettings', 'uci.get openclash.config access denied, fallback to openclash/settings HTML')
+    const payload = await fetchMaybeJson(resolveLuciPath(OPENCLASH_SETTINGS_PATH))
+    const parsed = parseOpenClashSettingsFromHtml(payload)
+
+    return {
+      ...parsed,
+      sampledAt: Date.now()
+    }
   }
 }
 
+/**
+ * Data source: UBUS preferred (`network.interface.lan/wan/wan6 status`), fallback LuCI iface_status
+ */
 export async function fetchPublicNetworkAddresses() {
-  const payload = await fetchMaybeJson(resolveLuciPath('/admin/network/iface_status/lan,wan,wan6'))
+  try {
+    const [lan, wan, wan6] = await Promise.all([
+      callUbus('network.interface.lan', 'status').catch(() => null),
+      callUbus('network.interface.wan', 'status').catch(() => null),
+      callUbus('network.interface.wan6', 'status').catch(() => null)
+    ])
 
-  if (!Array.isArray(payload)) {
-    throw new Error('公网地址接口返回格式无效')
-  }
+    const ipv4Candidates = [
+      ...extractIpList(wan?.['ipv4-address']),
+      ...extractIpList(lan?.['ipv4-address'])
+    ]
 
-  const lan = findInterfaceById(payload, 'lan')
-  const wan = findInterfaceById(payload, 'wan')
-  const wan6 = findInterfaceById(payload, 'wan6')
+    const ipv6Candidates = [
+      ...extractIpList(wan6?.['ipv6-address']),
+      ...extractIpList(wan?.['ipv6-address']),
+      ...extractIpList(lan?.['ipv6-address'])
+    ]
 
-  const ipv4Candidates = [
-    ...extractIpList(wan?.ipaddrs || wan?.ipv4_addresses || wan?.ipv4),
-    ...extractIpList(lan?.ipaddrs || lan?.ipv4_addresses || lan?.ipv4)
-  ]
+    return {
+      ipv4: pickPrimaryPublicIp(ipv4Candidates, 'ipv4'),
+      ipv6: pickPrimaryPublicIp(ipv6Candidates, 'ipv6'),
+      sampledAt: Date.now()
+    }
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
 
-  const ipv6Candidates = [
-    ...extractIpList(wan6?.ip6addrs || wan6?.ipv6_addresses || wan6?.ipv6),
-    ...extractIpList(wan?.ip6addrs || wan?.ipv6_addresses || wan?.ipv6),
-    ...extractIpList(lan?.ip6addrs || lan?.ipv6_addresses || lan?.ipv6)
-  ]
+    logUbusFallback('fetchPublicNetworkAddresses', 'network.interface.* access denied, fallback to iface_status')
+    const payload = await fetchMaybeJson(resolveLuciPath('/admin/network/iface_status/lan,wan,wan6'))
 
-  return {
-    ipv4: pickPrimaryPublicIp(ipv4Candidates, 'ipv4'),
-    ipv6: pickPrimaryPublicIp(ipv6Candidates, 'ipv6'),
-    sampledAt: Date.now()
+    if (!Array.isArray(payload)) {
+      throw new Error('公网地址接口返回格式无效')
+    }
+
+    const lan = findInterfaceById(payload, 'lan')
+    const wan = findInterfaceById(payload, 'wan')
+    const wan6 = findInterfaceById(payload, 'wan6')
+
+    const ipv4Candidates = [
+      ...extractIpList(wan?.ipaddrs || wan?.ipv4_addresses || wan?.ipv4),
+      ...extractIpList(lan?.ipaddrs || lan?.ipv4_addresses || lan?.ipv4)
+    ]
+
+    const ipv6Candidates = [
+      ...extractIpList(wan6?.ip6addrs || wan6?.ipv6_addresses || wan6?.ipv6),
+      ...extractIpList(wan?.ip6addrs || wan?.ipv6_addresses || wan?.ipv6),
+      ...extractIpList(lan?.ip6addrs || lan?.ipv6_addresses || lan?.ipv6)
+    ]
+
+    return {
+      ipv4: pickPrimaryPublicIp(ipv4Candidates, 'ipv4'),
+      ipv6: pickPrimaryPublicIp(ipv6Candidates, 'ipv6'),
+      sampledAt: Date.now()
+    }
   }
 }
 
+/**
+ * Data source: UBUS preferred (`uci get dhcp.lan`), fallback HTML network/dhcp
+ */
 export async function fetchDhcpLanIpv6Config() {
-  const payload = await fetchMaybeJson(resolveLuciPath(NETWORK_DHCP_PATH))
-  const parsed = parseDhcpLanIpv6MetaFromHtml(payload)
+  try {
+    const payload = await callUbus('uci', 'get', {
+      config: 'dhcp',
+      section: 'lan'
+    })
 
-  return {
-    ...parsed,
-    sampledAt: Date.now()
+    const values = payload?.values && typeof payload.values === 'object' ? payload.values : {}
+    const ra = String(values.ra || '-').toLowerCase()
+    const dhcpv6 = String(values.dhcpv6 || '-').toLowerCase()
+    const ndp = String(values.ndp || '-').toLowerCase()
+
+    const toMode = (value) => value === 'relay' ? '中继模式' : value === 'server' ? '服务器模式' : '已禁用'
+    const toBoolText = (value) => {
+      const v = String(value ?? '').trim().toLowerCase()
+      return v === '1' || v === 'true' || v === 'yes' || v === 'on' ? '已启用' : '未启用'
+    }
+
+    const toList = (value) => {
+      if (Array.isArray(value)) {
+        return value.map((item) => String(item || '').trim()).filter(Boolean)
+      }
+      const text = String(value || '').trim()
+      return text ? text.split(/[\s,]+/).filter(Boolean) : []
+    }
+
+    return {
+      designatedMaster: toBoolText(values.master),
+      raServiceMode: toMode(ra),
+      dhcpv6ServiceMode: toMode(dhcpv6),
+      ndpProxyMode: toMode(ndp),
+      dhcpv6Mode: toList(values.ra_flags).length ? toList(values.ra_flags).join(' + ') : '-',
+      alwaysAdvertiseDefaultRoute: toBoolText(values.ra_default),
+      advertisedDnsServers: toList(values.dns),
+      advertisedDnsDomains: toList(values.domain),
+      sampledAt: Date.now()
+    }
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
+
+    logUbusFallback('fetchDhcpLanIpv6Config', 'uci.get dhcp.lan access denied, fallback to network/dhcp HTML')
+    const payload = await fetchMaybeJson(resolveLuciPath(NETWORK_DHCP_PATH))
+    const parsed = parseDhcpLanIpv6MetaFromHtml(payload)
+
+    return {
+      ...parsed,
+      sampledAt: Date.now()
+    }
   }
 }
 
+/**
+ * Data source: UBUS preferred (`uci get AdGuardHome.AdGuardHome`), fallback HTML AdGuardHome
+ */
 export async function fetchAdGuardHomeConfig() {
-  const payload = await fetchMaybeJson(resolveLuciPath(ADGUARD_HOME_PATH))
-  const parsed = parseAdGuardHomeMetaFromHtml(payload)
+  try {
+    const payload = await callUbus('uci', 'get', {
+      config: 'AdGuardHome',
+      section: 'AdGuardHome'
+    })
+    const parsed = parseAdGuardHomeConfigFromUci(payload)
 
-  return {
-    ...parsed,
-    sampledAt: Date.now()
+    return {
+      ...parsed,
+      sampledAt: Date.now()
+    }
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
+
+    logUbusFallback('fetchAdGuardHomeConfig', 'uci.get AdGuardHome access denied, fallback to AdGuardHome HTML')
+    const payload = await fetchMaybeJson(resolveLuciPath(ADGUARD_HOME_PATH))
+    const parsed = parseAdGuardHomeMetaFromHtml(payload)
+
+    return {
+      ...parsed,
+      sampledAt: Date.now()
+    }
   }
 }
 
+/**
+ * Data source: LuCI JSON (`/admin/services/AdGuardHome/status`)
+ */
 export async function fetchAdGuardHomeStatus() {
   const payload = await fetchMaybeJson(resolveLuciPath(ADGUARD_HOME_STATUS_PATH))
 
@@ -2205,16 +2636,54 @@ export async function fetchAdGuardHomeStatus() {
   }
 }
 
+/**
+ * Data source: UBUS preferred (`uci get ddns-go.<section>`), fallback HTML ddns-go
+ */
 export async function fetchDdnsGoConfig() {
-  const payload = await fetchMaybeJson(resolveLuciPath(DDNS_GO_PATH))
-  const parsed = parseDdnsGoMetaFromHtml(payload)
+  try {
+    const all = await callUbus('uci', 'get', {
+      config: 'ddns-go'
+    })
 
-  return {
-    ...parsed,
-    sampledAt: Date.now()
+    const valuesRoot = all?.values && typeof all.values === 'object' ? all.values : {}
+    const sectionName = Object.keys(valuesRoot).find((key) => {
+      const section = valuesRoot[key]
+      return section && typeof section === 'object' && section['.type'] === 'ddns-go'
+    }) || Object.keys(valuesRoot)[0] || null
+
+    const sectionPayload = sectionName
+      ? await callUbus('uci', 'get', {
+        config: 'ddns-go',
+        section: sectionName
+      })
+      : { values: {} }
+
+    const parsed = parseDdnsGoConfigFromUci(sectionPayload)
+
+    return {
+      section: sectionName || '',
+      ...parsed,
+      sampledAt: Date.now()
+    }
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
+
+    logUbusFallback('fetchDdnsGoConfig', 'uci.get ddns-go access denied, fallback to ddns-go HTML')
+    const payload = await fetchMaybeJson(resolveLuciPath(DDNS_GO_PATH))
+    const parsed = parseDdnsGoMetaFromHtml(payload)
+
+    return {
+      ...parsed,
+      sampledAt: Date.now()
+    }
   }
 }
 
+/**
+ * Data source: LuCI JSON (`/admin/services/ddnsgo_status`)
+ */
 export async function fetchDdnsGoStatus() {
   const payload = await fetchMaybeJson(resolveLuciPath(DDNS_GO_STATUS_PATH))
 
@@ -2228,34 +2697,98 @@ export async function fetchDdnsGoStatus() {
   }
 }
 
+/**
+ * Data source: UBUS preferred (`appfilter.*`), fallback LuCI appfilter RPC endpoints
+ */
 export async function fetchAppFilterStatus() {
-  const [runPayload, basePayload] = await Promise.all([
-    fetchMaybeJson(resolveLuciPath(APPFILTER_OAF_STATUS_PATH)).catch(() => null),
-    fetchMaybeJson(resolveLuciPath(APPFILTER_BASE_PATH)).catch(() => null)
-  ])
+  try {
+    const [runPayload, basePayload] = await Promise.all([
+      callUbus('appfilter', 'get_oaf_status').catch(() => null),
+      callUbus('appfilter', 'get_app_filter_base').catch(() => null)
+    ])
 
-  const runData = runPayload && typeof runPayload === 'object' ? runPayload.data || {} : {}
-  const baseData = basePayload && typeof basePayload === 'object' ? basePayload.data || {} : {}
+    const runData = runPayload && typeof runPayload === 'object' ? runPayload.data || runPayload : {}
+    const baseData = basePayload && typeof basePayload === 'object' ? basePayload.data || basePayload : {}
 
-  const engineStatus = Number(runData.engine_status)
-  const configEnable = Number(runData.config_enable)
-  const runtimeEnable = Number(runData.enable)
-  const workModeRaw = Number(baseData.work_mode)
+    const engineStatus = Number(runData.engine_status)
+    const configEnable = Number(runData.config_enable)
+    const runtimeEnable = Number(runData.enable)
+    const workModeRaw = Number(baseData.work_mode)
 
-  return {
-    runningStatus: engineStatus === 1 ? (configEnable === 0 ? '未配置' : runtimeEnable === 1 ? '运行中' : '未运行') : '未运行',
-    workMode: workModeRaw === 1 ? '旁路模式' : workModeRaw === 0 ? '网关模式' : '-',
-    recordEnabled: Number(baseData.record_enable) === 1 ? '已启用' : Number(baseData.record_enable) === 0 ? '未启用' : '-',
-    sampledAt: Date.now()
+    return {
+      runningStatus: engineStatus === 1 ? (configEnable === 0 ? '未配置' : runtimeEnable === 1 ? '运行中' : '未运行') : '未运行',
+      workMode: workModeRaw === 1 ? '旁路模式' : workModeRaw === 0 ? '网关模式' : '-',
+      recordEnabled: Number(baseData.record_enable) === 1 ? '已启用' : Number(baseData.record_enable) === 0 ? '未启用' : '-',
+      sampledAt: Date.now()
+    }
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
+
+    logUbusFallback('fetchAppFilterStatus', 'appfilter ubus access denied, fallback to LuCI appfilter endpoints')
+    const [runPayload, basePayload] = await Promise.all([
+      fetchMaybeJson(resolveLuciPath(APPFILTER_OAF_STATUS_PATH)).catch(() => null),
+      fetchMaybeJson(resolveLuciPath(APPFILTER_BASE_PATH)).catch(() => null)
+    ])
+
+    const runData = runPayload && typeof runPayload === 'object' ? runPayload.data || {} : {}
+    const baseData = basePayload && typeof basePayload === 'object' ? basePayload.data || {} : {}
+
+    const engineStatus = Number(runData.engine_status)
+    const configEnable = Number(runData.config_enable)
+    const runtimeEnable = Number(runData.enable)
+    const workModeRaw = Number(baseData.work_mode)
+
+    return {
+      runningStatus: engineStatus === 1 ? (configEnable === 0 ? '未配置' : runtimeEnable === 1 ? '运行中' : '未运行') : '未运行',
+      workMode: workModeRaw === 1 ? '旁路模式' : workModeRaw === 0 ? '网关模式' : '-',
+      recordEnabled: Number(baseData.record_enable) === 1 ? '已启用' : Number(baseData.record_enable) === 0 ? '未启用' : '-',
+      sampledAt: Date.now()
+    }
   }
 }
 
+/**
+ * Data source: UBUS preferred (`uci get network.wan`), fallback HTML network/wan
+ */
 export async function fetchNetworkWanConfig() {
-  const payload = await fetchMaybeJson(resolveLuciPath(NETWORK_WAN_PATH))
-  const parsed = parseNetworkInterfaceMetaFromHtml(payload, 'wan')
+  try {
+    const payload = await callUbus('uci', 'get', {
+      config: 'network',
+      section: 'wan'
+    })
 
-  return {
-    ...parsed,
-    sampledAt: Date.now()
+    const values = payload?.values && typeof payload.values === 'object' ? payload.values : {}
+
+    return {
+      protocol: String(values.proto || '-'),
+      ipv4: String(values.ipaddr || '-'),
+      netmask: String(values.netmask || '-'),
+      gateway: String(values.gateway || '-'),
+      dns: Array.isArray(values.dns)
+        ? values.dns.map((item) => String(item || '').trim()).filter(Boolean)
+        : typeof values.dns === 'string' && values.dns.trim()
+          ? values.dns.split(/[\s,]+/).filter(Boolean)
+          : [],
+      ipv6assign: String(values.ip6assign || '-'),
+      pppoeUsername: String(values.username || '-'),
+      pppoePasswordMasked: values.password ? '******' : '-',
+      mtu: String(values.mtu || '-'),
+      sampledAt: Date.now()
+    }
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
+
+    logUbusFallback('fetchNetworkWanConfig', 'uci.get network.wan access denied, fallback to network/wan HTML')
+    const payload = await fetchMaybeJson(resolveLuciPath(NETWORK_WAN_PATH))
+    const parsed = parseNetworkInterfaceMetaFromHtml(payload, 'wan')
+
+    return {
+      ...parsed,
+      sampledAt: Date.now()
+    }
   }
 }
