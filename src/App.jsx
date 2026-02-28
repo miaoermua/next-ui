@@ -18,29 +18,24 @@ import {
   X
 } from 'lucide-react'
 import {
-  fetchAdGuardHomeConfig,
-  fetchAdGuardHomeStatus,
-  fetchAppFilterStatus,
-  fetchDdnsGoConfig,
-  fetchDdnsGoStatus,
   fetchDhcpLanIpv6Config,
   fetchIfaceTrafficRates,
-  fetchInstalledPackages,
-  fetchInterfaceStatusBatch,
   fetchInterfaceStatusByName,
   fetchNetworkLanConfig,
   fetchNetworkWanConfig,
-  fetchOpenClashToolbarStatus,
   fetchPackagesStorageMeta,
   fetchPublicNetworkAddresses,
   fetchOverviewStatus,
-  fetchStartupEntries,
   getRouterDefaults,
-  setRouterAddress,
-  fetchTopProcesses
+  setRouterAddress
 } from './api/router'
 import { useTheme } from './hooks/useTheme'
 import { useRouterAuth } from './hooks/useRouterAuth'
+import { ServicesPage } from './pages/ServicesPage'
+import { PluginsPage } from './pages/PluginsPage'
+import { VpnPage } from './pages/VpnPage'
+import { InstalledPackagesPage } from './pages/PackagesPage'
+import { TerminalPage } from './pages/TerminalPage'
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: Gauge },
@@ -206,30 +201,41 @@ function extractCpuLabelFromHostModel(hostModel, fallback = 'CPU 型号未知') 
     return fallback
   }
 
-  const lower = source.toLowerCase()
-  const markers = [
-    { index: lower.indexOf('amd'), token: 'amd' },
-    { index: lower.indexOf('intel'), token: 'intel' },
-    { index: source.indexOf('英特尔'), token: '英特尔' },
-    { index: source.indexOf('英特尓'), token: '英特尓' }
-  ].filter((item) => item.index >= 0)
-
-  if (!markers.length) {
-    return fallback
+  const cleanLabel = (value) => {
+    return String(value || '')
+      .replace(/\(R\)|\(TM\)/gi, '')
+      .replace(/\s+CPU\b/gi, '')
+      .replace(/\s*@\s*[\d.]+\s*GHz\b/gi, '')
+      .replace(/\s+\d+C\d+T.*$/i, '')
+      .replace(/[）)]/g, ' ')
+      .replace(/^[\s\-–—]+/, '')
+      .replace(/[\s\-–—]+$/, '')
+      .replace(/\s+/g, ' ')
+      .trim()
   }
 
-  const start = markers.reduce((result, item) => Math.min(result, item.index), Number.MAX_SAFE_INTEGER)
-  let snippet = source.slice(start)
+  const vendorPattern = /(?:AMD|Intel)[^,;|/()（）]*/gi
+  const vendorMatches = [...source.matchAll(vendorPattern)]
+    .map((item) => cleanLabel(item[0]))
+    .filter(Boolean)
 
-  snippet = snippet
+  if (vendorMatches.length) {
+    return vendorMatches[0]
+  }
+
+  const socMatch = source.match(/\b(?:MT\d{4,5}[A-Za-z0-9\-]*|IPQ\d+[A-Za-z0-9\-]*|BCM\d+[A-Za-z0-9\-]*|RK\d+[A-Za-z0-9\-]*)\b/i)
+  if (socMatch?.[0]) {
+    const normalized = cleanLabel(socMatch[0])
+    if (normalized) {
+      return normalized
+    }
+  }
+
+  const snippet = source
     .split(/\s*[：:|／/]\s*|\s+\(CpuMark\b/i)[0]
-    .replace(/\s+\d+C\d+T.*$/i, '')
-    .replace(/[）)]/g, ' ')
-    .replace(/^[\s\-–—]+/, '')
-    .replace(/[\s\-–—]+$/, '')
     .trim()
 
-  return snippet || fallback
+  return cleanLabel(snippet) || cleanLabel(source) || fallback
 }
 
 function UsageCard({ icon: Icon, title, value, percent, description }) {
@@ -497,120 +503,6 @@ function TrafficTrendCard({ downSeries, upSeries }) {
         ) : null}
       </ChartCanvas>
       <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">鼠标悬停可查看指定采样点的上下行速率。</p>
-    </section>
-  )
-}
-
-function ProcessTopCard({ processes, updatedAt, statusText, loading, onRefresh }) {
-  return (
-    <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">系统进程</h3>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">来源：/cgi-bin/luci/admin/status/processes（非自动刷新）</p>
-        </div>
-        <button
-          className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-          disabled={loading}
-          onClick={onRefresh}
-          type="button"
-        >
-          {loading ? '刷新中...' : '刷新列表'}
-        </button>
-      </div>
-
-      <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
-        <table className="min-w-full divide-y divide-zinc-200 text-left text-xs">
-          <thead className="bg-zinc-50 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-            <tr>
-              <th className="px-3 py-2 font-medium">PID</th>
-              <th className="px-3 py-2 font-medium">用户</th>
-              <th className="px-3 py-2 font-medium">CPU%</th>
-              <th className="px-3 py-2 font-medium">MEM%</th>
-              <th className="px-3 py-2 font-medium">命令</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100 bg-white text-zinc-700 dark:divide-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
-            {processes.length ? (
-              processes.map((item) => (
-                <tr key={item.id}>
-                  <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-100">{item.pid}</td>
-                  <td className="px-3 py-2">{item.user}</td>
-                  <td className="px-3 py-2">{item.cpu.toFixed(1)}</td>
-                  <td className="px-3 py-2">{item.mem.toFixed(1)}</td>
-                  <td className="max-w-[24rem] truncate px-3 py-2" title={item.command}>
-                    {item.command}
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td className="px-3 py-4 text-zinc-500 dark:text-zinc-400" colSpan={5}>
-                  暂无进程数据，点击“刷新列表”尝试读取。
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">{statusText || `上次更新时间：${updatedAt || '--:--:--'}`}</p>
-    </section>
-  )
-}
-
-function StartupItemsCard({ items, updatedAt, statusText, loading, onRefresh }) {
-  return (
-    <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">启动项</h3>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">来源：/cgi-bin/luci/admin/system/startup（静态抓取）</p>
-        </div>
-        <button
-          className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-          disabled={loading}
-          onClick={onRefresh}
-          type="button"
-        >
-          {loading ? '刷新中...' : '刷新列表'}
-        </button>
-      </div>
-
-      <div className="overflow-x-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
-        <table className="min-w-full divide-y divide-zinc-200 text-left text-xs">
-          <thead className="bg-zinc-50 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-            <tr>
-              <th className="px-3 py-2 font-medium">优先级</th>
-              <th className="px-3 py-2 font-medium">服务</th>
-              <th className="px-3 py-2 font-medium">状态</th>
-              <th className="px-3 py-2 font-medium">操作</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100 bg-white text-zinc-700 dark:divide-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
-            {items.length ? (
-              items.map((item) => (
-                <tr key={item.id}>
-                  <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-100">{item.priority}</td>
-                  <td className="px-3 py-2">{item.name}</td>
-                  <td className="px-3 py-2">{item.enabled}</td>
-                  <td className="max-w-[20rem] truncate px-3 py-2" title={item.actions.join(' / ')}>
-                    {item.actions.join(' / ')}
-                  </td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td className="px-3 py-4 text-zinc-500 dark:text-zinc-400" colSpan={4}>
-                  暂无启动项数据，点击“刷新列表”尝试读取。
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">{statusText || `上次更新时间：${updatedAt || '--:--:--'}`}</p>
     </section>
   )
 }
@@ -974,17 +866,27 @@ function Dashboard({ authState, credentials }) {
 
   useEffect(() => {
     let cancelled = false
+    let dynamicPending = false
+    let staticPending = false
 
-    const updateOverview = async () => {
-      if (!authState.authenticated) {
+    if (!authState.authenticated) {
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const updateDynamicMetrics = async () => {
+      if (!authState.authenticated || dynamicPending) {
         return
       }
 
+      dynamicPending = true
+
       try {
-        const overview = await fetchOverviewStatus()
-        const ifaceRates = await fetchIfaceTrafficRates()
-        const storageMeta = await fetchPackagesStorageMeta()
-        const publicNetwork = await fetchPublicNetworkAddresses().catch(() => null)
+        const [overview, ifaceRates] = await Promise.all([
+          fetchOverviewStatus(),
+          fetchIfaceTrafficRates()
+        ])
 
         if (cancelled) {
           return
@@ -1041,13 +943,6 @@ function Dashboard({ authState, credentials }) {
           connCount: overview.conncount || 0,
           connMax: overview.connmax || 0,
           routerTime: overview.localtime || previous.routerTime,
-          overlayFreePercent:
-            typeof storageMeta.freeSpacePercentValue === 'number'
-              ? storageMeta.freeSpacePercentValue
-              : previous.overlayFreePercent,
-          overlayFreeText: storageMeta.freeSpaceText || previous.overlayFreeText,
-          publicIpv4: publicNetwork?.ipv4 || previous.publicIpv4,
-          publicIpv6: publicNetwork?.ipv6 || previous.publicIpv6,
           source: 'router'
         }))
 
@@ -1063,15 +958,64 @@ function Dashboard({ authState, credentials }) {
         if (cancelled) {
           return
         }
+      } finally {
+        dynamicPending = false
       }
     }
 
-    updateOverview()
-    const timer = window.setInterval(updateOverview, 1800)
+    const updateStaticMetrics = async () => {
+      if (!authState.authenticated || staticPending) {
+        return
+      }
+
+      staticPending = true
+
+      try {
+        const [storageMetaResult, publicNetworkResult] = await Promise.allSettled([
+          fetchPackagesStorageMeta(),
+          fetchPublicNetworkAddresses()
+        ])
+
+        if (cancelled) {
+          return
+        }
+
+        const storageMeta = storageMetaResult.status === 'fulfilled' ? storageMetaResult.value : null
+        const publicNetwork = publicNetworkResult.status === 'fulfilled' ? publicNetworkResult.value : null
+
+        if (!storageMeta && !publicNetwork) {
+          return
+        }
+
+        setSystemMetrics((previous) => ({
+          ...previous,
+          overlayFreePercent:
+            typeof storageMeta?.freeSpacePercentValue === 'number'
+              ? storageMeta.freeSpacePercentValue
+              : previous.overlayFreePercent,
+          overlayFreeText: storageMeta?.freeSpaceText || previous.overlayFreeText,
+          publicIpv4: publicNetwork?.ipv4 || previous.publicIpv4,
+          publicIpv6: publicNetwork?.ipv6 || previous.publicIpv6
+        }))
+      } catch {
+        if (cancelled) {
+          return
+        }
+      } finally {
+        staticPending = false
+      }
+    }
+
+    updateDynamicMetrics()
+    updateStaticMetrics()
+
+    const dynamicTimer = window.setInterval(updateDynamicMetrics, 1800)
+    const staticTimer = window.setInterval(updateStaticMetrics, 15_000)
 
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      window.clearInterval(dynamicTimer)
+      window.clearInterval(staticTimer)
     }
   }, [authState.authenticated])
 
@@ -1449,903 +1393,6 @@ function NetworkSettingsPage() {
   )
 }
 
-function InstalledPackagesPage() {
-  const [packages, setPackages] = useState([])
-  const [query, setQuery] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [statusText, setStatusText] = useState('')
-  const [updatedAt, setUpdatedAt] = useState('')
-  const [meta, setMeta] = useState({
-    total: 0,
-    listHint: '',
-    freeSpacePercent: '',
-    freeSpacePercentValue: 0,
-    freeSpaceText: '',
-    truncated: false
-  })
-
-  const loadPackages = async () => {
-    setLoading(true)
-
-    try {
-      const result = await fetchInstalledPackages(3000)
-      setPackages(result.items || [])
-      setMeta({
-        total: result.total || 0,
-        listHint: result.listHint || '',
-        freeSpacePercent: result.freeSpacePercent || '',
-        freeSpacePercentValue:
-          typeof result.freeSpacePercentValue === 'number' ? result.freeSpacePercentValue : 0,
-        freeSpaceText: result.freeSpaceText || '',
-        truncated: Boolean(result.truncated)
-      })
-
-      const sampleTime = new Date(result.sampledAt || Date.now()).toLocaleTimeString('zh-CN', {
-        hour12: false
-      })
-      setUpdatedAt(sampleTime)
-      setStatusText(result.truncated ? '列表过长，已按名称排序后截断展示。' : '')
-    } catch (error) {
-      setStatusText(error?.message || '读取软件包失败')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadPackages()
-  }, [])
-
-  const filteredItems = useMemo(() => {
-    const keyword = query.trim().toLowerCase()
-    if (!keyword) {
-      return packages
-    }
-
-    return packages.filter((item) => {
-      const name = String(item.name || '').toLowerCase()
-      const version = String(item.version || '').toLowerCase()
-      return name.includes(keyword) || version.includes(keyword)
-    })
-  }, [packages, query])
-
-  return (
-    <section className="space-y-4">
-      <div>
-        <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">软件包（已安装）</h2>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">来源：/cgi-bin/luci/admin/system/packages?display=installed</p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">软件包总数</p>
-          <p className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">{meta.total || 0}</p>
-        </div>
-
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">空闲空间</p>
-          <p className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-            {meta.freeSpacePercent ? `${meta.freeSpacePercent} (${meta.freeSpaceText || '-'})` : '-'}
-          </p>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-700"
-              style={{ width: `${clamp(meta.freeSpacePercentValue || 0, 0, 100)}%` }}
-            />
-          </div>
-          <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-            已用 {clamp(100 - (meta.freeSpacePercentValue || 0), 0, 100)}%
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">当前筛选结果</p>
-          <p className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">{filteredItems.length}</p>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            className="w-full max-w-md rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition focus:border-zinc-400 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100 dark:focus:border-zinc-500"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="按包名或版本筛选"
-            type="text"
-            value={query}
-          />
-          <button
-            className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-            disabled={loading}
-            onClick={loadPackages}
-            type="button"
-          >
-            {loading ? '刷新中...' : '刷新列表'}
-          </button>
-        </div>
-
-        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
-          {statusText || `上次更新时间：${updatedAt || '--:--:--'}`}
-          {meta.listHint ? ` · ${meta.listHint}` : ''}
-        </p>
-      </div>
-
-      <div className="overflow-auto rounded-xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
-        <table className="min-w-full divide-y divide-zinc-200 text-left text-sm">
-          <thead className="sticky top-0 bg-zinc-50 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-            <tr>
-              <th className="px-4 py-3 font-medium">软件包名称</th>
-              <th className="px-4 py-3 font-medium">版本</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100 bg-white text-zinc-700 dark:divide-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
-            {filteredItems.length ? (
-              filteredItems.map((item) => (
-                <tr key={item.id}>
-                  <td className="px-4 py-2.5 font-medium text-zinc-900 dark:text-zinc-100">{item.name}</td>
-                  <td className="px-4 py-2.5">{item.version}</td>
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td className="px-4 py-5 text-zinc-500 dark:text-zinc-400" colSpan={2}>
-                  暂无可展示的软件包，请检查登录状态后重试。
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  )
-}
-
-function formatUptime(seconds) {
-  const total = Math.max(0, Number(seconds) || 0)
-  if (!total) {
-    return '-'
-  }
-
-  const days = Math.floor(total / 86400)
-  const hours = Math.floor((total % 86400) / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  const secs = Math.floor(total % 60)
-
-  if (days > 0) {
-    return `${days}天 ${hours}小时 ${minutes}分`
-  }
-
-  if (hours > 0) {
-    return `${hours}小时 ${minutes}分 ${secs}秒`
-  }
-
-  if (minutes > 0) {
-    return `${minutes}分 ${secs}秒`
-  }
-
-  return `${secs}秒`
-}
-
-function VpnTrafficCard({ iface, downSeries, upSeries }) {
-  const width = 480
-  const height = 180
-  const [hoverPoint, setHoverPoint] = useState(null)
-  const currentDown = downSeries[downSeries.length - 1] ?? 0
-  const currentUp = upSeries[upSeries.length - 1] ?? 0
-  const bounds = getSeriesBounds([downSeries, upSeries])
-  const downPath = createLinePath(downSeries, width, height, bounds.min, bounds.max)
-  const upPath = createLinePath(upSeries, width, height, bounds.min, bounds.max)
-  const downAreaPath = createAreaPath(downSeries, width, height, bounds.min, bounds.max)
-
-  const handleMove = (event) => {
-    const point = getPointByClientX(event, downSeries, width)
-    if (!point) {
-      setHoverPoint(null)
-      return
-    }
-
-    setHoverPoint({
-      ...point,
-      down: Number(downSeries[point.index] || 0),
-      up: Number(upSeries[point.index] || 0)
-    })
-  }
-
-  const handleLeave = () => setHoverPoint(null)
-
-  return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">{iface.label} 流量</h3>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            接口 {iface.ifname || iface.id} · 协议 {iface.proto || '-'} · 运行 {formatUptime(iface.uptime)}
-          </p>
-          <div className="mt-2 flex items-center gap-4 text-xs">
-            <span className="flex items-center gap-1.5 text-zinc-700 dark:text-zinc-200">
-              <span className="h-2 w-2 rounded-full bg-sky-500" />
-              下行 {formatRate(currentDown)}
-            </span>
-            <span className="flex items-center gap-1.5 text-zinc-700 dark:text-zinc-200">
-              <span className="h-2 w-2 rounded-full bg-violet-500" />
-              上行 {formatRate(currentUp)}
-            </span>
-          </div>
-        </div>
-        <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">最近 {downSeries.length} 个采样点</span>
-      </div>
-
-      <ChartCanvas>
-        <svg className="h-full w-full" preserveAspectRatio="none" viewBox={`0 0 ${width} ${height}`}>
-          <defs>
-            <linearGradient id={`vpnTrafficFill-${iface.id}`} x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="#0ea5e9" stopOpacity="0.28" />
-              <stop offset="100%" stopColor="#0ea5e9" stopOpacity="0" />
-            </linearGradient>
-          </defs>
-          <path d={downAreaPath} fill={`url(#vpnTrafficFill-${iface.id})`} />
-          <path d={downPath} fill="none" stroke="#0ea5e9" strokeWidth="2" />
-          <path d={upPath} fill="none" stroke="#8b5cf6" strokeWidth="2" />
-
-          {hoverPoint ? (
-            <line
-              x1={hoverPoint.x}
-              x2={hoverPoint.x}
-              y1={10}
-              y2={height - 10}
-              stroke="#64748b"
-              strokeDasharray="4 4"
-              strokeWidth="1"
-            />
-          ) : null}
-        </svg>
-
-        <div
-          className="absolute inset-0"
-          onMouseLeave={handleLeave}
-          onMouseMove={handleMove}
-        />
-
-        {hoverPoint ? (
-          <div className="pointer-events-none absolute left-3 top-3 rounded-md bg-zinc-900/90 px-2 py-1 text-xs text-white dark:bg-zinc-100/90 dark:text-zinc-900">
-            采样 #{hoverPoint.index + 1} · 下行 {formatRate(hoverPoint.down)} · 上行 {formatRate(hoverPoint.up)}
-          </div>
-        ) : null}
-      </ChartCanvas>
-
-      <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-zinc-600 dark:text-zinc-300 sm:grid-cols-2">
-        <span className="rounded-md bg-zinc-100 px-2 py-1 dark:bg-zinc-800">总接收 {iface.rxHuman}</span>
-        <span className="rounded-md bg-zinc-100 px-2 py-1 dark:bg-zinc-800">总发送 {iface.txHuman}</span>
-      </div>
-    </section>
-  )
-}
-
-function OpenClashStatusCard({ status, loading, error }) {
-  return (
-    <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-      <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">OpenClash 实时状态</h3>
-          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">来源：/cgi-bin/luci/admin/services/openclash/toolbar_show</p>
-        </div>
-        <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-          {loading ? '刷新中' : '已刷新'}
-        </span>
-      </div>
-
-      {error ? (
-        <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>
-      ) : status ? (
-        <>
-          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">下行速率</p>
-              <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{status.down || '-'}</p>
-            </div>
-            <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">上行速率</p>
-              <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{status.up || '-'}</p>
-            </div>
-            <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">连接数</p>
-              <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{status.connections ?? 0}</p>
-            </div>
-            <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">CPU / 内存</p>
-              <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{status.cpu || '-'}% / {status.mem || '-'}</p>
-            </div>
-          </div>
-
-          <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-zinc-600 dark:text-zinc-300 sm:grid-cols-4">
-            <span className="rounded-md bg-zinc-100 px-2 py-1 dark:bg-zinc-800">累计下载 {status.down_total || '-'}</span>
-            <span className="rounded-md bg-zinc-100 px-2 py-1 dark:bg-zinc-800">累计上传 {status.up_total || '-'}</span>
-            <span className="rounded-md bg-zinc-100 px-2 py-1 dark:bg-zinc-800">负载 {status.load_avg || '-'}</span>
-            <span className="rounded-md bg-zinc-100 px-2 py-1 dark:bg-zinc-800">采样 {status.sampledAtText || '--:--:--'}</span>
-          </div>
-        </>
-      ) : (
-        <p className="text-sm text-zinc-500 dark:text-zinc-400">暂无 OpenClash 数据。</p>
-      )}
-    </section>
-  )
-}
-
-function VpnPage({ credentials, authState }) {
-  const [ifaceCards, setIfaceCards] = useState([])
-  const [statusText, setStatusText] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [openClash, setOpenClash] = useState(null)
-  const [openClashAvailable, setOpenClashAvailable] = useState(false)
-  const [openClashLoading, setOpenClashLoading] = useState(false)
-  const [openClashError, setOpenClashError] = useState('')
-
-  const loadVpnData = async () => {
-    try {
-      setRouterAddress(credentials.address)
-    } catch {
-      setStatusText('请先输入正确的路由器地址，再刷新 VPN 数据。')
-      return
-    }
-
-    setLoading(true)
-    setStatusText('')
-
-    try {
-      const rows = await fetchInterfaceStatusBatch(['EasyTier', 'tailscale'])
-      const now = Date.now()
-
-      setIfaceCards((previous) => {
-        return rows.map((row) => {
-          const prev = previous.find((item) => item.id === row.id)
-          const prevSample = prev?.sample
-          const elapsedSeconds = prevSample && now > prevSample.sampledAt
-            ? Math.max(1, (now - prevSample.sampledAt) / 1000)
-            : null
-
-          const downMbps =
-            prevSample && elapsedSeconds && row.rxBytes >= prevSample.rxBytes
-              ? Math.max(0, ((row.rxBytes - prevSample.rxBytes) * 8) / elapsedSeconds / 1_000_000)
-              : 0
-
-          const upMbps =
-            prevSample && elapsedSeconds && row.txBytes >= prevSample.txBytes
-              ? Math.max(0, ((row.txBytes - prevSample.txBytes) * 8) / elapsedSeconds / 1_000_000)
-              : 0
-
-          return {
-            id: row.id,
-            label: String(row.id || '').toLowerCase() === 'easytier' ? 'EasyTier' : 'Tailscale',
-            ifname: row.ifname,
-            proto: row.proto,
-            uptime: row.uptime,
-            rxHuman: `${(row.rxBytes / 1024 / 1024).toFixed(1)} MB`,
-            txHuman: `${(row.txBytes / 1024 / 1024).toFixed(1)} MB`,
-            downSeries: pushAndTrim(prev?.downSeries || createSeries(CHART_SERIES_LENGTH, () => 0), downMbps),
-            upSeries: pushAndTrim(prev?.upSeries || createSeries(CHART_SERIES_LENGTH, () => 0), upMbps),
-            sample: {
-              rxBytes: row.rxBytes,
-              txBytes: row.txBytes,
-              sampledAt: now
-            }
-          }
-        })
-      })
-
-      if (!rows.length) {
-        setStatusText('未检测到 EasyTier 或 Tailscale 接口，已隐藏对应 VPN 图表。')
-      }
-    } catch (error) {
-      setStatusText(error?.message || '读取 VPN 接口状态失败。')
-      setIfaceCards([])
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const loadOpenClashStatus = async () => {
-    try {
-      setRouterAddress(credentials.address)
-    } catch {
-      setOpenClashError('请先输入正确的路由器地址，再刷新 OpenClash 数据。')
-      return
-    }
-
-    setOpenClashLoading(true)
-    setOpenClashError('')
-
-    try {
-      const data = await fetchOpenClashToolbarStatus()
-      setOpenClash({
-        down: typeof data.downRaw === 'string' && data.downRaw ? data.downRaw : `${data.downRateMbps.toFixed(2)} Mbps`,
-        up: typeof data.upRaw === 'string' && data.upRaw ? data.upRaw : `${data.upRateMbps.toFixed(2)} Mbps`,
-        down_total: data.downTotal,
-        up_total: data.upTotal,
-        connections: data.connections,
-        load_avg: data.loadAvg,
-        mem: data.mem,
-        cpu: data.cpu,
-        sampledAtText: new Date(data.sampledAt).toLocaleTimeString('zh-CN', { hour12: false })
-      })
-      setOpenClashAvailable(true)
-    } catch (error) {
-      setOpenClashError(error?.message || '读取 OpenClash 数据失败。')
-    } finally {
-      setOpenClashLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (!authState.authenticated || !authState.luciAuthenticated) {
-      setIfaceCards([])
-      setStatusText('未登录路由器，无法读取 VPN 数据。')
-      setOpenClash(null)
-      setOpenClashAvailable(false)
-      return
-    }
-
-    loadVpnData()
-    loadOpenClashStatus()
-
-    const timer = window.setInterval(() => {
-      loadVpnData()
-      loadOpenClashStatus()
-    }, 2000)
-
-    return () => window.clearInterval(timer)
-  }, [authState.authenticated, authState.luciAuthenticated, credentials.address])
-
-  return (
-    <section className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">VPN</h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">自动检测 EasyTier / Tailscale，并展示实时流量走势</p>
-        </div>
-        <button
-          className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-          disabled={loading || openClashLoading}
-          onClick={() => {
-            loadVpnData()
-            loadOpenClashStatus()
-          }}
-          type="button"
-        >
-          {loading || openClashLoading ? '刷新中...' : '刷新 VPN 数据'}
-        </button>
-      </div>
-
-      {openClashAvailable ? <OpenClashStatusCard error={openClashError} loading={openClashLoading} status={openClash} /> : null}
-
-      {ifaceCards.length ? (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          {ifaceCards.map((iface) => (
-            <VpnTrafficCard
-              key={iface.id}
-              downSeries={iface.downSeries}
-              iface={iface}
-              upSeries={iface.upSeries}
-            />
-          ))}
-        </div>
-      ) : (
-        <section className="rounded-xl border border-zinc-200 bg-white p-6 text-sm text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400">
-          未检测到可展示流量图的 VPN 接口（EasyTier / Tailscale）。
-        </section>
-      )}
-
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">{statusText || 'VPN 数据每 2 秒自动刷新一次。'}</p>
-    </section>
-  )
-}
-
-function PluginsPage({ credentials, authState }) {
-  const [loading, setLoading] = useState(false)
-  const [statusText, setStatusText] = useState('')
-  const [updatedAt, setUpdatedAt] = useState('')
-  const [adgConfig, setAdgConfig] = useState({
-    enabled: false,
-    httpPort: '-',
-    redirectMode: '-',
-    coreVersion: '-',
-    binPath: '-',
-    configPath: '-',
-    workDir: '-',
-    logFile: '-',
-    verbose: false,
-    waitOnBoot: false,
-    backupFiles: [],
-    backupWorkDirPath: '-'
-  })
-  const [adgStatus, setAdgStatus] = useState({
-    running: false,
-    redirected: false
-  })
-  const [ddnsConfig, setDdnsConfig] = useState({
-    enabled: false,
-    port: '-',
-    updateInterval: '-',
-    compareTimes: '-',
-    skipVerify: false,
-    dnsServer: '-',
-    noWeb: false,
-    delay: '-',
-    description: ''
-  })
-  const [ddnsStatus, setDdnsStatus] = useState({
-    running: false
-  })
-  const [appFilter, setAppFilter] = useState({
-    runningStatus: '-',
-    workMode: '-',
-    recordEnabled: '-'
-  })
-
-  const loadPlugins = async () => {
-    try {
-      setRouterAddress(credentials.address)
-    } catch {
-      setStatusText('请先输入正确的路由器地址，再刷新插件信息。')
-      return
-    }
-
-    setLoading(true)
-    setStatusText('')
-
-    try {
-      const [config, status, ddns, ddnsStatus, appFilterStatus] = await Promise.all([
-        fetchAdGuardHomeConfig(),
-        fetchAdGuardHomeStatus().catch(() => ({ running: false, redirected: false })),
-        fetchDdnsGoConfig().catch(() => null),
-        fetchDdnsGoStatus().catch(() => ({ running: false })),
-        fetchAppFilterStatus().catch(() => ({ runningStatus: '-', workMode: '-', recordEnabled: '-' }))
-      ])
-
-      setAdgConfig({
-        enabled: Boolean(config.enabled),
-        httpPort: config.httpPort || '-',
-        redirectMode: config.redirectMode || '-',
-        coreVersion: config.coreVersion || '-',
-        binPath: config.binPath || '-',
-        configPath: config.configPath || '-',
-        workDir: config.workDir || '-',
-        logFile: config.logFile || '-',
-        verbose: Boolean(config.verbose),
-        waitOnBoot: Boolean(config.waitOnBoot),
-        backupFiles: Array.isArray(config.backupFiles) ? config.backupFiles : [],
-        backupWorkDirPath: config.backupWorkDirPath || '-'
-      })
-
-      setAdgStatus({
-        running: Boolean(status.running),
-        redirected: Boolean(status.redirected)
-      })
-
-      setDdnsConfig({
-        enabled: Boolean(ddns?.enabled),
-        port: ddns?.port || '-',
-        updateInterval: ddns?.updateInterval || '-',
-        compareTimes: ddns?.compareTimes || '-',
-        skipVerify: Boolean(ddns?.skipVerify),
-        dnsServer: ddns?.dnsServer || '-',
-        noWeb: Boolean(ddns?.noWeb),
-        delay: ddns?.delay || '-',
-        description: ddns?.description || ''
-      })
-
-      setDdnsStatus({
-        running: Boolean(ddnsStatus?.running)
-      })
-
-      setAppFilter({
-        runningStatus: appFilterStatus?.runningStatus || '-',
-        workMode: appFilterStatus?.workMode || '-',
-        recordEnabled: appFilterStatus?.recordEnabled || '-'
-      })
-
-      setUpdatedAt(
-        new Date().toLocaleTimeString('zh-CN', {
-          hour12: false
-        })
-      )
-    } catch (error) {
-      setStatusText(error?.message || '读取 AdGuardHome 配置失败，请确认 LuCI 登录态与插件安装状态。')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    if (!authState.authenticated || !authState.luciAuthenticated) {
-      setStatusText('未登录路由器，无法读取插件信息。')
-      return
-    }
-
-    loadPlugins()
-  }, [authState.authenticated, authState.luciAuthenticated, credentials.address])
-
-  return (
-    <section className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">插件</h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">LuCI 服务页面</p>
-        </div>
-        <button
-          className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-          disabled={loading}
-          onClick={loadPlugins}
-          type="button"
-        >
-          {loading ? '刷新中...' : '刷新插件信息'}
-        </button>
-      </div>
-
-      <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">AdGuardHome 状态</h3>
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span
-              className={`rounded-full px-2.5 py-1 font-medium ${
-                adgConfig.enabled
-                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                  : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-              }`}
-            >
-              {adgConfig.enabled ? '已启用' : '未启用'}
-            </span>
-            <span
-              className={`rounded-full px-2.5 py-1 font-medium ${
-                adgStatus.running
-                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                  : 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
-              }`}
-            >
-              {adgStatus.running ? '运行中' : '未运行'}
-            </span>
-            <span
-              className={`rounded-full px-2.5 py-1 font-medium ${
-                adgStatus.redirected
-                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                  : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-              }`}
-            >
-              {adgStatus.redirected ? '已重定向' : '未重定向'}
-            </span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">核心版本</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{adgConfig.coreVersion}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">网页管理端口</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{adgConfig.httpPort}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">6060 重定向</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{adgConfig.redirectMode}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">执行文件路径</p>
-            <p className="mt-1 truncate font-semibold text-zinc-900 dark:text-zinc-100" title={adgConfig.binPath}>{adgConfig.binPath}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">配置文件路径</p>
-            <p className="mt-1 truncate font-semibold text-zinc-900 dark:text-zinc-100" title={adgConfig.configPath}>{adgConfig.configPath}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">工作目录</p>
-            <p className="mt-1 truncate font-semibold text-zinc-900 dark:text-zinc-100" title={adgConfig.workDir}>{adgConfig.workDir}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">运行日志</p>
-            <p className="mt-1 truncate font-semibold text-zinc-900 dark:text-zinc-100" title={adgConfig.logFile}>{adgConfig.logFile}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">详细日志</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{adgConfig.verbose ? '已启用' : '未启用'}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">开机后网络准备好时重启</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{adgConfig.waitOnBoot ? '已启用' : '未启用'}</p>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">关机备份文件</p>
-          <p className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-            {adgConfig.backupFiles.length ? adgConfig.backupFiles.join(' / ') : '-'}
-          </p>
-          <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">备份路径：{adgConfig.backupWorkDirPath}</p>
-        </div>
-      </section>
-
-      <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">应用过滤</h3>
-        </div>
-
-        <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">运行状态</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{appFilter.runningStatus}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">工作模式</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{appFilter.workMode}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">应用记录</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{appFilter.recordEnabled}</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">DDNS-GO 状态</h3>
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span
-              className={`rounded-full px-2.5 py-1 font-medium ${
-                ddnsConfig.enabled
-                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                  : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-              }`}
-            >
-              {ddnsConfig.enabled ? '已启用' : '未启用'}
-            </span>
-            <span
-              className={`rounded-full px-2.5 py-1 font-medium ${
-                ddnsStatus.running
-                  ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                  : 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300'
-              }`}
-            >
-              {ddnsStatus.running ? '服务已启动' : '服务未启动'}
-            </span>
-          </div>
-        </div>
-
-        {ddnsConfig.description ? (
-          <p className="rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-            {ddnsConfig.description}
-          </p>
-        ) : null}
-
-        <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">访问端口</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.port}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">更新间隔</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.updateInterval}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">间隔 N 次与服务商比对</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.compareTimes}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">指定 DNS 服务器</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.dnsServer}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">跳过证书验证</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.skipVerify ? '是' : '否'}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">不启动 Web 服务</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.noWeb ? '是' : '否'}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">开机延时启动（秒）</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.delay}</p>
-          </div>
-        </div>
-      </section>
-
-      <p className="text-xs text-zinc-500 dark:text-zinc-400">{statusText || `上次更新时间：${updatedAt || '--:--:--'}`}</p>
-    </section>
-  )
-}
-
-function ServicesPage({ credentials }) {
-  const [topProcesses, setTopProcesses] = useState([])
-  const [processesUpdatedAt, setProcessesUpdatedAt] = useState('')
-  const [processesLoading, setProcessesLoading] = useState(false)
-  const [processesStatus, setProcessesStatus] = useState('')
-  const [startupItems, setStartupItems] = useState([])
-  const [startupUpdatedAt, setStartupUpdatedAt] = useState('')
-  const [startupLoading, setStartupLoading] = useState(false)
-  const [startupStatus, setStartupStatus] = useState('')
-
-  const loadTopProcesses = async () => {
-    try {
-      setRouterAddress(credentials.address)
-    } catch {
-      setProcessesStatus('请先输入正确的路由器地址，再刷新进程列表。')
-      return
-    }
-
-    setProcessesLoading(true)
-    setProcessesStatus('')
-
-    try {
-      const payload = await fetchTopProcesses()
-      setTopProcesses(payload.items)
-      setProcessesUpdatedAt(
-        new Date(payload.sampledAt).toLocaleTimeString('zh-CN', {
-          hour12: false
-        })
-      )
-    } catch {
-      setProcessesStatus('读取进程列表失败，请确认 LuCI 登录态与页面访问权限。')
-    } finally {
-      setProcessesLoading(false)
-    }
-  }
-
-  const loadStartupItems = async () => {
-    try {
-      setRouterAddress(credentials.address)
-    } catch {
-      setStartupStatus('请先输入正确的路由器地址，再刷新启动项。')
-      return
-    }
-
-    setStartupLoading(true)
-    setStartupStatus('')
-
-    try {
-      const payload = await fetchStartupEntries(300)
-      setStartupItems(payload.items)
-      setStartupUpdatedAt(
-        new Date(payload.sampledAt).toLocaleTimeString('zh-CN', {
-          hour12: false
-        })
-      )
-    } catch {
-      setStartupStatus('读取启动项失败，请确认 LuCI 登录态与访问权限。')
-    } finally {
-      setStartupLoading(false)
-    }
-  }
-
-  useEffect(() => {
-    loadTopProcesses()
-    loadStartupItems()
-  }, [credentials.address])
-
-  return (
-    <section className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">服务</h2>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">系统进程与启动项（左右排布）</p>
-      </div>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <ProcessTopCard
-          loading={processesLoading}
-          onRefresh={loadTopProcesses}
-          processes={topProcesses}
-          statusText={processesStatus}
-          updatedAt={processesUpdatedAt}
-        />
-
-        <StartupItemsCard
-          items={startupItems}
-          loading={startupLoading}
-          onRefresh={loadStartupItems}
-          statusText={startupStatus}
-          updatedAt={startupUpdatedAt}
-        />
-      </div>
-    </section>
-  )
-}
-
 function PlaceholderPage({ title, description }) {
   return (
     <section className="rounded-xl border border-zinc-200 bg-white p-8 dark:border-zinc-700 dark:bg-zinc-900">
@@ -2376,36 +1423,6 @@ function PlaceholderPage({ title, description }) {
     </section>
   )
 }
-
-function TerminalPage({ ttydUrl }) {
-  return (
-    <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">终端</h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">连接 TTYD：{ttydUrl}</p>
-        </div>
-        <a
-          className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-          href={ttydUrl}
-          rel="noreferrer"
-          target="_blank"
-        >
-          新窗口打开
-        </a>
-      </div>
-
-      <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
-        <iframe
-          className="h-[74vh] w-full bg-black"
-          src={ttydUrl}
-          title="TTYD 终端"
-        />
-      </div>
-    </section>
-  )
-}
-
 
 function App() {
   const [activePage, setActivePage] = useState('dashboard')

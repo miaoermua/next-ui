@@ -76,16 +76,17 @@ pnpm run preview
 
 ## 代理与请求机制
 
-本项目没有独立常驻后端，开发环境通过 Vite 中间件代理路由器请求，生产（Vercel）通过 Serverless Function 代理。
+本项目没有独立常驻后端，当前仅内置 **开发环境代理**（Vite 中间件）。
 
 - 前端统一请求前缀：`/router-api`
 - 开发代理中间件：`vite.config.js`
-- 生产代理入口：`api/router-api.js`（由 `vercel.json` 将 `/router-api/*` 重写到该函数）
 - 路由器目标由请求头控制：
   - `x-router-host`（例如 `10.0.0.4`）
   - `x-router-scheme`（`http` 或 `https`）
 
-代理会将 Cookie `Path` 重写到 `/router-api`，从而在浏览器侧保持会话。
+如果你要部署静态产物到线上（如 Nginx/Caddy/Cloudflare），需要自行提供 `/router-api/*` 的反向代理能力。
+
+代理应当将 Cookie `Path` 重写到 `/router-api`，从而在浏览器侧保持会话。
 
 ## 主要数据来源（LuCI / ubus）
 

@@ -961,26 +961,46 @@ function parseProcessRowsFromHtml(html) {
 
   const rows = []
 
+  const getCellText = (cell) => {
+    if (!cell) {
+      return ''
+    }
+
+    const inputValue = cell.querySelector('input[type="hidden"]')?.value
+    if (typeof inputValue === 'string' && inputValue.trim()) {
+      return inputValue.trim()
+    }
+
+    return cell.textContent?.replace(/\s+/g, ' ').trim() || ''
+  }
+
+  const mapProcessCells = (cells) => {
+    if (!Array.isArray(cells) || cells.length < 5) {
+      return null
+    }
+
+    const [pid, user, command, cpu, mem] = cells
+
+    return {
+      pid,
+      user,
+      command,
+      cpu,
+      mem
+    }
+  }
+
   if (typeof DOMParser !== 'undefined') {
     const doc = new DOMParser().parseFromString(html, 'text/html')
-    const trList = Array.from(doc.querySelectorAll('table tr'))
+    const trList = Array.from(doc.querySelectorAll('tr[id^="cbi-table-"]'))
 
     trList.forEach((tr, rowIndex) => {
-      const cells = Array.from(tr.querySelectorAll('td')).map((cell) =>
-        cell.textContent?.replace(/\s+/g, ' ').trim()
-      )
-
-      if (cells.length < 3) {
+      const cells = Array.from(tr.querySelectorAll('td')).map((cell) => getCellText(cell))
+      const mapped = mapProcessCells(cells)
+      if (!mapped) {
         return
       }
 
-      const mapped = {
-        pid: cells[0],
-        user: cells[1],
-        cpu: cells[2],
-        mem: cells[3],
-        command: cells.slice(4).join(' ') || cells[3]
-      }
       const normalized = normalizeProcessEntry(mapped, rowIndex)
       if (normalized) {
         rows.push(normalized)
@@ -992,21 +1012,40 @@ function parseProcessRowsFromHtml(html) {
     }
   }
 
-  const trMatches = html.match(/<tr[\s\S]*?<\/tr>/gi) || []
+  const trMatches = html.match(/<tr[^>]*id="cbi-table-[^"]+"[\s\S]*?<\/tr>/gi) || []
   trMatches.forEach((tr, rowIndex) => {
-    const tdMatches = tr.match(/<t[dh][^>]*>[\s\S]*?<\/t[dh]>/gi) || []
-    const cells = tdMatches.map((cell) => stripHtml(cell))
-    if (cells.length < 3) {
+    const valueByField = {}
+    Array.from(tr.matchAll(/id="cbid\.table\.[^"]+\.([^"]+)"\s+value="([^"]*)"/gi)).forEach((match) => {
+      const field = String(match[1] || '').toLowerCase()
+      const value = String(match[2] || '').trim()
+      if (field) {
+        valueByField[field] = value
+      }
+    })
+
+    const mapped = {
+      pid: valueByField.pid || '',
+      user: valueByField.user || '',
+      command: valueByField.command || '',
+      cpu: valueByField['%cpu'] || valueByField.cpu || '',
+      mem: valueByField['%mem'] || valueByField.mem || ''
+    }
+
+    if (!mapped.pid || !mapped.command) {
+      const tdMatches = tr.match(/<td[^>]*>[\s\S]*?<\/td>/gi) || []
+      const cells = tdMatches.map((cell) => stripHtml(cell))
+      const fallbackMapped = mapProcessCells(cells)
+      if (!fallbackMapped) {
+        return
+      }
+
+      const normalized = normalizeProcessEntry(fallbackMapped, rowIndex)
+      if (normalized) {
+        rows.push(normalized)
+      }
       return
     }
 
-    const mapped = {
-      pid: cells[0],
-      user: cells[1],
-      cpu: cells[2],
-      mem: cells[3],
-      command: cells.slice(4).join(' ') || cells[3]
-    }
     const normalized = normalizeProcessEntry(mapped, rowIndex)
     if (normalized) {
       rows.push(normalized)
