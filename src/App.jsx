@@ -18,7 +18,6 @@ import {
   X
 } from 'lucide-react'
 import {
-  diagnoseRouterConnection,
   fetchAdGuardHomeConfig,
   fetchAdGuardHomeStatus,
   fetchAppFilterStatus,
@@ -37,12 +36,11 @@ import {
   fetchOverviewStatus,
   fetchStartupEntries,
   getRouterDefaults,
-  getRouterAuthState,
-  loginRouter,
-  resetRouterAuth,
   setRouterAddress,
   fetchTopProcesses
 } from './api/router'
+import { useTheme } from './hooks/useTheme'
+import { useRouterAuth } from './hooks/useRouterAuth'
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: Gauge },
@@ -2327,46 +2325,27 @@ function TerminalPage({ ttydUrl }) {
 
 
 function App() {
-  const shouldAutoLogin = ROUTER_DEFAULTS.autoLogin && Boolean(ROUTER_DEFAULTS.password)
   const [activePage, setActivePage] = useState('dashboard')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [aboutOpen, setAboutOpen] = useState(false)
-  const [authState, setAuthState] = useState(getRouterAuthState())
-  const [credentials, setCredentials] = useState({
-    address: ROUTER_DEFAULTS.address || authState.address,
-    password: ROUTER_DEFAULTS.password || ''
-  })
-  const [authLoading, setAuthLoading] = useState(false)
-  const [authMessage, setAuthMessage] = useState(
-    shouldAutoLogin ? '检测到本地环境凭据，准备自动登录...' : '未登录，请在右上角设置中连接路由器'
-  )
-  const [successToast, setSuccessToast] = useState('')
-  const [diagnostics, setDiagnostics] = useState(null)
-  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false)
   const [hasPromptedLogin, setHasPromptedLogin] = useState(false)
-  const [autoLoginTried, setAutoLoginTried] = useState(!shouldAutoLogin)
-  const [systemDark, setSystemDark] = useState(() => {
-    try {
-      return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false
-    } catch {
-      return false
-    }
-  })
-  const [theme, setTheme] = useState(() => {
-    try {
-      const saved = window.localStorage.getItem('ui-theme')
-      if (saved === 'dark' || saved === 'light' || saved === 'system') {
-        return saved
-      }
-
-      return 'system'
-    } catch {
-      return 'system'
-    }
-  })
-
-  const isDark = theme === 'system' ? systemDark : theme === 'dark'
+  const { theme, isDark, setTheme } = useTheme()
+  const {
+    authState,
+    credentials,
+    authLoading,
+    authMessage,
+    successToast,
+    setSuccessToast,
+    diagnostics,
+    diagnosticsLoading,
+    autoLoginTried,
+    handleAuthInput,
+    handleLogin,
+    handleLogout,
+    runDiagnostics
+  } = useRouterAuth(ROUTER_DEFAULTS)
   const ttydUrl = useMemo(() => {
     const sourceAddress = String(
       credentials.address || authState.address || ROUTER_DEFAULTS.address || 'http://192.168.1.1'
@@ -2387,47 +2366,6 @@ function App() {
     .replace(/\/$/, '')}/cgi-bin/luci?luci_username=root&luci_password=${encodeURIComponent(credentials.password || '')}`
 
   useEffect(() => {
-    document.documentElement.classList.toggle('dark', isDark)
-    try {
-      window.localStorage.setItem('ui-theme', theme)
-    } catch {
-      // ignore storage failures
-    }
-  }, [isDark, theme])
-
-  useEffect(() => {
-    const media = window.matchMedia?.('(prefers-color-scheme: dark)')
-    if (!media) {
-      return undefined
-    }
-
-    const handleChange = (event) => {
-      setSystemDark(event.matches)
-    }
-
-    setSystemDark(media.matches)
-    media.addEventListener?.('change', handleChange)
-
-    return () => {
-      media.removeEventListener?.('change', handleChange)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!successToast) {
-      return undefined
-    }
-
-    const timer = window.setTimeout(() => {
-      setSuccessToast('')
-    }, 2200)
-
-    return () => {
-      window.clearTimeout(timer)
-    }
-  }, [successToast])
-
-  useEffect(() => {
     if (autoLoginTried) {
       return undefined
     }
@@ -2435,37 +2373,7 @@ function App() {
     let cancelled = false
 
     const runAutoLogin = async () => {
-      setAuthLoading(true)
-      setAuthMessage('正在使用本地环境变量自动登录...')
-
-      try {
-        const nextAuthState = setRouterAddress(credentials.address)
-        if (cancelled) {
-          return
-        }
-
-        setAuthState(nextAuthState)
-        const state = await loginRouter('root', credentials.password)
-        if (cancelled) {
-          return
-        }
-
-        setAuthState(state)
-        const suffix = state.warning ? `（注意：${state.warning}）` : ''
-        setAuthMessage(`自动登录成功，已连接 ${state.address}${suffix}`)
-        setSuccessToast(`自动连接成功：${state.address}`)
-      } catch (error) {
-        if (cancelled) {
-          return
-        }
-
-        setAuthMessage(error?.message || '本地环境变量自动登录失败，请手动连接')
-      } finally {
-        if (!cancelled) {
-          setAuthLoading(false)
-          setAutoLoginTried(true)
-        }
-      }
+      // auto-login 逻辑已由 useRouterAuth 负责
     }
 
     runAutoLogin()
@@ -2486,64 +2394,6 @@ function App() {
     }
   }, [authState.authenticated, authState.luciAuthenticated, hasPromptedLogin, autoLoginTried])
 
-  const handleAuthInput = (field) => (event) => {
-    setCredentials((previous) => ({
-      ...previous,
-      [field]: event.target.value
-    }))
-  }
-
-  const handleLogin = async (event) => {
-    event.preventDefault()
-    setAuthLoading(true)
-    setAuthMessage('正在登录路由器...')
-
-    try {
-      const nextAuthState = setRouterAddress(credentials.address)
-      setAuthState(nextAuthState)
-
-      const state = await loginRouter('root', credentials.password)
-      setAuthState(state)
-      const suffix = state.warning ? `（注意：${state.warning}）` : ''
-      setAuthMessage(`登录成功，已连接 ${state.address}${suffix}`)
-      setSuccessToast(`连接成功：${state.address}`)
-    } catch (error) {
-      setAuthMessage(error?.message || '登录失败，请检查密码、代理或路由器登录状态')
-      setDiagnostics(null)
-    } finally {
-      setAuthLoading(false)
-    }
-  }
-
-  const handleLogout = () => {
-    resetRouterAuth()
-    const state = getRouterAuthState()
-    setAuthState(state)
-    setDiagnostics(null)
-    setAuthMessage(`已断开 ${state.address}，当前显示占位数据`)
-  }
-
-  const runDiagnostics = async () => {
-    setDiagnosticsLoading(true)
-    setDiagnostics(null)
-
-    try {
-      const nextAuthState = setRouterAddress(credentials.address)
-      setAuthState(nextAuthState)
-
-      const result = await diagnoseRouterConnection({
-        username: 'root',
-        password: credentials.password
-      })
-      setDiagnostics(result)
-      setAuthMessage(`诊断完成：通过 ${result.passed}/${result.total}`)
-    } catch (error) {
-      setAuthMessage(error?.message || '诊断失败')
-    } finally {
-      setDiagnosticsLoading(false)
-    }
-  }
-
   const handleThemeChange = (event) => {
     const next = event.target.value
     if (next === 'system' || next === 'light' || next === 'dark') {
@@ -2553,8 +2403,11 @@ function App() {
 
   const toggleTheme = () => {
     setTheme((previous) => {
-      const current = previous === 'system' ? (systemDark ? 'dark' : 'light') : previous
-      return current === 'dark' ? 'light' : 'dark'
+      if (previous === 'system') {
+        return isDark ? 'light' : 'dark'
+      }
+
+      return previous === 'dark' ? 'light' : 'dark'
     })
   }
 
