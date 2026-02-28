@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks'
 import {
   fetchInterfaceStatusBatch,
+  fetchOpenClashSettings,
   fetchOpenClashToolbarStatus,
   setRouterAddress
 } from '../api/router'
@@ -221,24 +222,44 @@ function VpnTrafficCard({ iface, downSeries, upSeries }) {
   )
 }
 
-function OpenClashStatusCard({ status, loading, error }) {
+function OpenClashStatusCard({ status, loading, error, zashboardUrl, luciSettingsUrl }) {
   return (
     <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">OpenClash 实时状态</h3>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">来源：/cgi-bin/luci/admin/services/openclash/toolbar_show</p>
         </div>
-        <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-          {loading ? '刷新中' : '已刷新'}
-        </span>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <a
+            className="rounded-full border border-zinc-300 px-2.5 py-1 font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            href={zashboardUrl}
+            rel="noreferrer"
+            target="_blank"
+            title={zashboardUrl === '#' ? '请先确认路由器地址、端口与密钥' : zashboardUrl}
+          >
+            OpenClash Zashboard 入口
+          </a>
+          <a
+            className="rounded-full border border-zinc-300 px-2.5 py-1 font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            href={luciSettingsUrl}
+            rel="noreferrer"
+            target="_blank"
+            title={luciSettingsUrl === '#' ? '请先确认路由器地址' : luciSettingsUrl}
+          >
+            OpenClash 设置页
+          </a>
+          <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+            {loading ? '刷新中' : '已刷新'}
+          </span>
+        </div>
       </div>
 
       {error ? (
         <p className="text-sm text-rose-600 dark:text-rose-400">{error}</p>
       ) : status ? (
         <>
-          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3 lg:grid-cols-6">
             <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
               <p className="text-xs text-zinc-500 dark:text-zinc-400">下行速率</p>
               <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{status.down || '-'}</p>
@@ -254,6 +275,14 @@ function OpenClashStatusCard({ status, loading, error }) {
             <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
               <p className="text-xs text-zinc-500 dark:text-zinc-400">CPU / 内存</p>
               <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{status.cpu || '-'}% / {status.mem || '-'}</p>
+            </div>
+            <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">Dashboard 端口</p>
+              <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{status.dashboardPort || '-'}</p>
+            </div>
+            <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">登录密钥</p>
+              <p className="mt-1 break-all font-semibold text-zinc-900 dark:text-zinc-100">{status.dashboardSecret || '(未设置)'}</p>
             </div>
           </div>
 
@@ -279,6 +308,10 @@ export function VpnPage({ credentials, authState }) {
   const [openClashAvailable, setOpenClashAvailable] = useState(false)
   const [openClashLoading, setOpenClashLoading] = useState(false)
   const [openClashError, setOpenClashError] = useState('')
+  const [openClashSettings, setOpenClashSettings] = useState({
+    dashboardPort: '-',
+    dashboardSecret: ''
+  })
 
   const loadVpnData = async () => {
     try {
@@ -355,7 +388,19 @@ export function VpnPage({ credentials, authState }) {
     setOpenClashError('')
 
     try {
-      const data = await fetchOpenClashToolbarStatus()
+      const [data, settings] = await Promise.all([
+        fetchOpenClashToolbarStatus(),
+        fetchOpenClashSettings().catch(() => ({
+          dashboardPort: '-',
+          dashboardSecret: ''
+        }))
+      ])
+
+      setOpenClashSettings({
+        dashboardPort: settings.dashboardPort || '-',
+        dashboardSecret: settings.dashboardSecret || ''
+      })
+
       setOpenClash({
         down: typeof data.downRaw === 'string' && data.downRaw ? data.downRaw : `${data.downRateMbps.toFixed(2)} Mbps`,
         up: typeof data.upRaw === 'string' && data.upRaw ? data.upRaw : `${data.upRateMbps.toFixed(2)} Mbps`,
@@ -365,6 +410,8 @@ export function VpnPage({ credentials, authState }) {
         load_avg: data.loadAvg,
         mem: data.mem,
         cpu: data.cpu,
+        dashboardPort: settings.dashboardPort || '-',
+        dashboardSecret: settings.dashboardSecret || '',
         sampledAtText: new Date(data.sampledAt).toLocaleTimeString('zh-CN', { hour12: false })
       })
       setOpenClashAvailable(true)
@@ -375,12 +422,30 @@ export function VpnPage({ credentials, authState }) {
     }
   }
 
+  const normalizedAddress = String(credentials.address || '')
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/$/, '')
+  const effectiveDashboardPort = openClashSettings.dashboardPort && openClashSettings.dashboardPort !== '-'
+    ? openClashSettings.dashboardPort
+    : openClash?.dashboardPort && openClash.dashboardPort !== '-'
+      ? openClash.dashboardPort
+      : '9090'
+  const effectiveDashboardSecret =
+    openClashSettings.dashboardSecret || openClash?.dashboardSecret || ''
+  const openClashZashboardUrl = normalizedAddress
+    ? `http://${normalizedAddress}:${effectiveDashboardPort}/ui/zashboard/#/setup?hostname=${encodeURIComponent(normalizedAddress)}&port=${encodeURIComponent(effectiveDashboardPort)}&secret=${encodeURIComponent(effectiveDashboardSecret)}`
+    : '#'
+  const luciOpenClashSettingsUrl = normalizedAddress
+    ? `http://${normalizedAddress}/cgi-bin/luci/admin/services/openclash/settings/`
+    : '#'
+
   useEffect(() => {
     if (!authState.authenticated || !authState.luciAuthenticated) {
       setIfaceCards([])
       setStatusText('未登录路由器，无法读取 VPN 数据。')
       setOpenClash(null)
       setOpenClashAvailable(false)
+      setOpenClashSettings({ dashboardPort: '-', dashboardSecret: '' })
       return
     }
 
@@ -415,7 +480,15 @@ export function VpnPage({ credentials, authState }) {
         </button>
       </div>
 
-      {openClashAvailable ? <OpenClashStatusCard error={openClashError} loading={openClashLoading} status={openClash} /> : null}
+      {openClashAvailable ? (
+        <OpenClashStatusCard
+          error={openClashError}
+          loading={openClashLoading}
+          luciSettingsUrl={luciOpenClashSettingsUrl}
+          status={openClash}
+          zashboardUrl={openClashZashboardUrl}
+        />
+      ) : null}
 
       {ifaceCards.length ? (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">

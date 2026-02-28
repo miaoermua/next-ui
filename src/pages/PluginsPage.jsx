@@ -50,6 +50,25 @@ export function PluginsPage({ credentials, authState }) {
     recordEnabled: '-'
   })
 
+  const normalizedAddress = String(credentials.address || '')
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/$/, '')
+  const adgLuciUrl = normalizedAddress
+    ? `http://${normalizedAddress}/cgi-bin/luci/admin/services/AdGuardHome`
+    : '#'
+  const appFilterLuciUrl = normalizedAddress
+    ? `http://${normalizedAddress}/cgi-bin/luci/admin/services/appfilter`
+    : '#'
+  const ddnsGoLuciUrl = normalizedAddress
+    ? `http://${normalizedAddress}/cgi-bin/luci/admin/services/ddns-go`
+    : '#'
+  const adgWebUiUrl = normalizedAddress && adgConfig.httpPort !== '-'
+    ? `http://${normalizedAddress}:${adgConfig.httpPort}`
+    : '#'
+  const ddnsGoWebUiUrl = normalizedAddress && ddnsConfig.port !== '-'
+    ? `http://${normalizedAddress}:${ddnsConfig.port}`
+    : '#'
+
   const loadPlugins = async () => {
     try {
       setRouterAddress(credentials.address)
@@ -154,6 +173,24 @@ export function PluginsPage({ credentials, authState }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">AdGuardHome 状态</h3>
           <div className="flex flex-wrap items-center gap-2 text-xs">
+            <a
+              className="rounded-full border border-zinc-300 px-2.5 py-1 font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              href={adgWebUiUrl}
+              rel="noreferrer"
+              target="_blank"
+              title={adgWebUiUrl === '#' ? '请先确认地址和管理端口' : adgWebUiUrl}
+            >
+              AdH 管理入口 WebUI
+            </a>
+            <a
+              className="rounded-full border border-zinc-300 px-2.5 py-1 font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              href={adgLuciUrl}
+              rel="noreferrer"
+              target="_blank"
+              title={adgLuciUrl === '#' ? '请先填写路由器地址' : adgLuciUrl}
+            >
+              插件路径入口
+            </a>
             <span
               className={`rounded-full px-2.5 py-1 font-medium ${
                 adgConfig.enabled
@@ -198,22 +235,6 @@ export function PluginsPage({ credentials, authState }) {
             <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{adgConfig.redirectMode}</p>
           </div>
           <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">执行文件路径</p>
-            <p className="mt-1 truncate font-semibold text-zinc-900 dark:text-zinc-100" title={adgConfig.binPath}>{adgConfig.binPath}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">配置文件路径</p>
-            <p className="mt-1 truncate font-semibold text-zinc-900 dark:text-zinc-100" title={adgConfig.configPath}>{adgConfig.configPath}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">工作目录</p>
-            <p className="mt-1 truncate font-semibold text-zinc-900 dark:text-zinc-100" title={adgConfig.workDir}>{adgConfig.workDir}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">运行日志</p>
-            <p className="mt-1 truncate font-semibold text-zinc-900 dark:text-zinc-100" title={adgConfig.logFile}>{adgConfig.logFile}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
             <p className="text-xs text-zinc-500 dark:text-zinc-400">详细日志</p>
             <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{adgConfig.verbose ? '已启用' : '未启用'}</p>
           </div>
@@ -223,18 +244,54 @@ export function PluginsPage({ credentials, authState }) {
           </div>
         </div>
 
-        <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">关机备份文件</p>
-          <p className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-            {adgConfig.backupFiles.length ? adgConfig.backupFiles.join(' / ') : '-'}
-          </p>
-          <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">备份路径：{adgConfig.backupWorkDirPath}</p>
-        </div>
+        <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800">
+          <summary className="cursor-pointer list-none text-sm font-semibold text-zinc-900 marker:hidden dark:text-zinc-100">
+            <span className="inline-flex items-center gap-2">
+              <span className="text-zinc-500 dark:text-zinc-400">▸</span>
+              路径与备份详情
+            </span>
+          </summary>
+          <div className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+            <div className="rounded-lg bg-white p-3 dark:bg-zinc-900/60">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">执行文件路径</p>
+              <p className="mt-1 break-all font-semibold text-zinc-900 dark:text-zinc-100">{adgConfig.binPath}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 dark:bg-zinc-900/60">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">配置文件路径</p>
+              <p className="mt-1 break-all font-semibold text-zinc-900 dark:text-zinc-100">{adgConfig.configPath}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 dark:bg-zinc-900/60">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">工作目录</p>
+              <p className="mt-1 break-all font-semibold text-zinc-900 dark:text-zinc-100">{adgConfig.workDir}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 dark:bg-zinc-900/60">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">运行日志</p>
+              <p className="mt-1 break-all font-semibold text-zinc-900 dark:text-zinc-100">{adgConfig.logFile}</p>
+            </div>
+          </div>
+
+          <div className="mt-3 rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-700 dark:bg-zinc-900/60">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">关机备份文件</p>
+            <p className="mt-1 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              {adgConfig.backupFiles.length ? adgConfig.backupFiles.join(' / ') : '-'}
+            </p>
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">备份路径：{adgConfig.backupWorkDirPath}</p>
+          </div>
+        </details>
       </section>
 
       <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">应用过滤</h3>
+          <a
+            className="rounded-full border border-zinc-300 px-2.5 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+            href={appFilterLuciUrl}
+            rel="noreferrer"
+            target="_blank"
+            title={appFilterLuciUrl === '#' ? '请先填写路由器地址' : appFilterLuciUrl}
+          >
+            应用过滤入口
+          </a>
         </div>
 
         <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
@@ -257,6 +314,24 @@ export function PluginsPage({ credentials, authState }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">DDNS-GO 状态</h3>
           <div className="flex flex-wrap items-center gap-2 text-xs">
+            <a
+              className="rounded-full border border-zinc-300 px-2.5 py-1 font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              href={ddnsGoWebUiUrl}
+              rel="noreferrer"
+              target="_blank"
+              title={ddnsGoWebUiUrl === '#' ? '请先确认地址和访问端口' : ddnsGoWebUiUrl}
+            >
+              DDNS-Go 管理入口 WebUI
+            </a>
+            <a
+              className="rounded-full border border-zinc-300 px-2.5 py-1 font-medium text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              href={ddnsGoLuciUrl}
+              rel="noreferrer"
+              target="_blank"
+              title={ddnsGoLuciUrl === '#' ? '请先填写路由器地址' : ddnsGoLuciUrl}
+            >
+              DDNS-GO 入口
+            </a>
             <span
               className={`rounded-full px-2.5 py-1 font-medium ${
                 ddnsConfig.enabled
@@ -284,36 +359,45 @@ export function PluginsPage({ credentials, authState }) {
           </p>
         ) : null}
 
-        <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">访问端口</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.port}</p>
+        <details className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-700 dark:bg-zinc-800">
+          <summary className="cursor-pointer list-none text-sm font-semibold text-zinc-900 marker:hidden dark:text-zinc-100">
+            <span className="inline-flex items-center gap-2">
+              <span className="text-zinc-500 dark:text-zinc-400">▸</span>
+              DDNS-GO 参数详情
+            </span>
+          </summary>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-lg bg-white p-3 dark:bg-zinc-900/60">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">访问端口</p>
+              <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.port}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 dark:bg-zinc-900/60">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">更新间隔</p>
+              <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.updateInterval}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 dark:bg-zinc-900/60">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">间隔 N 次与服务商比对</p>
+              <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.compareTimes}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 dark:bg-zinc-900/60">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">指定 DNS 服务器</p>
+              <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.dnsServer}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 dark:bg-zinc-900/60">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">跳过证书验证</p>
+              <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.skipVerify ? '是' : '否'}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 dark:bg-zinc-900/60">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">不启动 Web 服务</p>
+              <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.noWeb ? '是' : '否'}</p>
+            </div>
+            <div className="rounded-lg bg-white p-3 dark:bg-zinc-900/60">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">开机延时启动（秒）</p>
+              <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.delay}</p>
+            </div>
           </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">更新间隔</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.updateInterval}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">间隔 N 次与服务商比对</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.compareTimes}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">指定 DNS 服务器</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.dnsServer}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">跳过证书验证</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.skipVerify ? '是' : '否'}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">不启动 Web 服务</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.noWeb ? '是' : '否'}</p>
-          </div>
-          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">开机延时启动（秒）</p>
-            <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-100">{ddnsConfig.delay}</p>
-          </div>
-        </div>
+        </details>
       </section>
 
       <p className="text-xs text-zinc-500 dark:text-zinc-400">{statusText || `上次更新时间：${updatedAt || '--:--:--'}`}</p>

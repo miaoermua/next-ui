@@ -10,6 +10,7 @@ const NETWORK_LAN_PATH = '/admin/network/network/lan'
 const NETWORK_WAN_PATH = '/admin/network/network/wan'
 const NETWORK_DHCP_PATH = '/admin/network/dhcp'
 const OPENCLASH_TOOLBAR_PATH = '/admin/services/openclash/toolbar_show'
+const OPENCLASH_SETTINGS_PATH = '/admin/services/openclash/settings/'
 const ADGUARD_HOME_PATH = '/admin/services/AdGuardHome'
 const ADGUARD_HOME_STATUS_PATH = '/admin/services/AdGuardHome/status'
 const DDNS_GO_PATH = '/admin/services/ddns-go'
@@ -1416,6 +1417,20 @@ function parseDdnsGoMetaFromHtml(html) {
 }
 
 
+
+function parseOpenClashSettingsFromHtml(html) {
+  const prefix = 'cbid.openclash.config'
+
+  return {
+    dashboardPort: extractInputValueByName(html, `${prefix}.cn_port`) || '-',
+    dashboardSecret: extractInputValueByName(html, `${prefix}.dashboard_password`) || '',
+    dashboardForwardDomain: extractInputValueByName(html, `${prefix}.dashboard_forward_domain`) || '',
+    dashboardForwardPort: extractInputValueByName(html, `${prefix}.dashboard_forward_port`) || '',
+    dashboardForwardSsl: extractInputValueByName(html, `${prefix}.dashboard_forward_ssl`) === '1'
+  }
+}
+
+
 function parseNetworkInterfaceMetaFromHtml(html, iface) {
   const prefix = `cbid.network.${iface}`
 
@@ -2112,6 +2127,17 @@ export async function fetchOpenClashToolbarStatus() {
     loadAvg: String(payload.load_avg || '-'),
     mem: String(payload.mem || '-'),
     cpu: String(payload.cpu || '-'),
+    sampledAt: Date.now()
+  }
+}
+
+
+export async function fetchOpenClashSettings() {
+  const payload = await fetchMaybeJson(resolveLuciPath(OPENCLASH_SETTINGS_PATH))
+  const parsed = parseOpenClashSettingsFromHtml(payload)
+
+  return {
+    ...parsed,
     sampledAt: Date.now()
   }
 }

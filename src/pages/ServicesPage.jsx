@@ -184,7 +184,7 @@ export function ServicesPage({ credentials }) {
     <section className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">服务</h2>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">系统进程与启动项（左右排布）</p>
+        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">系统进程 top 与系统服务：启动项 init.d</p>
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
