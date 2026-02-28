@@ -2192,55 +2192,85 @@ export async function fetchStartupEntries(limit = 30) {
  * Data source: UBUS preferred (`file.exec` + `opkg list-installed`), fallback HTML packages page
  */
 export async function fetchInstalledPackages(limit = 2000) {
-  const payload = await callUbus('file', 'exec', {
-    command: '/bin/sh',
-    params: ['-c', 'opkg list-installed 2>/dev/null || opkg list-installed']
-  })
+  try {
+    const payload = await callUbus('file', 'exec', {
+      command: '/bin/sh',
+      params: ['-c', 'opkg list-installed 2>/dev/null || opkg list-installed']
+    })
 
-  const stdout = String(payload?.stdout || '')
-  const lines = stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
+    const stdout = String(payload?.stdout || '')
+    const lines = stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
 
-  const items = lines.map((line, index) => {
-    const dashIndex = line.indexOf(' - ')
-    if (dashIndex <= 0) {
-      return null
+    const items = lines.map((line, index) => {
+      const dashIndex = line.indexOf(' - ')
+      if (dashIndex <= 0) {
+        return null
+      }
+
+      const name = line.slice(0, dashIndex).trim()
+      const version = line.slice(dashIndex + 3).trim()
+      if (!name) {
+        return null
+      }
+
+      return {
+        id: `${name}-${index}`,
+        name,
+        version: version || '-'
+      }
+    }).filter(Boolean)
+
+    if (!items.length) {
+      throw new Error('无法解析已安装软件包列表')
     }
 
-    const name = line.slice(0, dashIndex).trim()
-    const version = line.slice(dashIndex + 3).trim()
-    if (!name) {
-      return null
-    }
+    const sorted = [...items]
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true }))
+      .slice(0, limit)
 
     return {
-      id: `${name}-${index}`,
-      name,
-      version: version || '-'
+      listHint: '来自 opkg list-installed',
+      freeSpacePercent: '',
+      freeSpacePercentValue: 0,
+      freeSpaceText: '',
+      total: items.length,
+      truncated: items.length > limit,
+      items: sorted,
+      sampledAt: Date.now()
     }
-  }).filter(Boolean)
+  } catch (error) {
+    if (!isAccessDeniedError(error)) {
+      throw error
+    }
 
-  if (!items.length) {
-    throw new Error('无法解析已安装软件包列表')
-  }
+    logUbusFallback('fetchInstalledPackages', 'file.exec access denied, fallback to packages HTML')
 
-  const sorted = [...items]
-    .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true }))
-    .slice(0, limit)
+    const payload = await fetchMaybeJson(resolveLuciPath(PACKAGES_PATH))
+    const items = parseInstalledPackageRowsFromHtml(payload)
 
-  return {
-    listHint: '来自 opkg list-installed',
-    freeSpacePercent: '',
-    freeSpacePercentValue: 0,
-    freeSpaceText: '',
-    total: items.length,
-    truncated: items.length > limit,
-    items: sorted,
-    sampledAt: Date.now()
+    if (!items.length) {
+      throw new Error('无法解析已安装软件包列表')
+    }
+
+    const sorted = [...items]
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN', { numeric: true }))
+      .slice(0, limit)
+
+    const meta = parsePackagePageMetaFromHtml(payload)
+
+    return {
+      ...meta,
+      total: items.length,
+      truncated: items.length > limit,
+      items: sorted,
+      sampledAt: Date.now()
+    }
   }
 }
+
 
 /**
  * Data source: UBUS preferred (`system.info`), fallback HTML packages page

@@ -41,7 +41,13 @@ export function InstalledPackagesPage() {
         hour12: false
       })
       setUpdatedAt(sampleTime)
-      setStatusText(result.truncated ? '列表过长，已按名称排序后截断展示。' : '')
+
+      const inLuciFallbackMode = String(result.listHint || '').includes('/cgi-bin/luci/admin/system/packages')
+      if (inLuciFallbackMode) {
+        setStatusText('当前为 LuCI 回退模式。')
+      } else {
+        setStatusText(result.truncated ? '列表过长，已按名称排序后截断展示。' : '')
+      }
     } catch (error) {
       setStatusText(error?.message || '读取软件包失败')
     } finally {

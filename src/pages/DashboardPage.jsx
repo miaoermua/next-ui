@@ -235,14 +235,14 @@ function StorageCard({ title, freePercent, freeText }) {
         空闲 {safePercent}% ({freeText || '-'})
       </p>
 
-      <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+      <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">已用 {usedPercent}% · Overlay 可写分区</p>
+
+      <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
         <div
           className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-700"
           style={{ width: `${safePercent}%` }}
         />
       </div>
-
-      <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">已用 {usedPercent}% · Overlay 可写分区</p>
     </div>
   )
 }
