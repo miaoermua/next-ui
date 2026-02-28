@@ -11,6 +11,7 @@ import {
   ArrowUp,
   ArrowDown,
   Network,
+  Terminal,
   Menu,
   Info,
   Settings,
@@ -46,6 +47,7 @@ import {
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: Gauge },
   { id: 'network', label: '网络设置', icon: Network },
+  { id: 'terminal', label: '终端', icon: Terminal },
   { id: 'packages', label: '软件包', icon: HardDrive },
   { id: 'services', label: '服务', icon: Wrench },
   { id: 'plugins', label: '插件', icon: Puzzle },
@@ -2294,6 +2296,35 @@ function PlaceholderPage({ title, description }) {
   )
 }
 
+function TerminalPage({ ttydUrl }) {
+  return (
+    <section className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">终端</h2>
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">连接 TTYD：{ttydUrl}</p>
+        </div>
+        <a
+          className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+          href={ttydUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          新窗口打开
+        </a>
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900">
+        <iframe
+          className="h-[74vh] w-full bg-black"
+          src={ttydUrl}
+          title="TTYD 终端"
+        />
+      </div>
+    </section>
+  )
+}
+
 
 function App() {
   const shouldAutoLogin = ROUTER_DEFAULTS.autoLogin && Boolean(ROUTER_DEFAULTS.password)
@@ -2336,6 +2367,21 @@ function App() {
   })
 
   const isDark = theme === 'system' ? systemDark : theme === 'dark'
+  const ttydUrl = useMemo(() => {
+    const sourceAddress = String(
+      credentials.address || authState.address || ROUTER_DEFAULTS.address || 'http://192.168.1.1'
+    ).trim()
+
+    try {
+      const parsed = new URL(/^https?:\/\//i.test(sourceAddress) ? sourceAddress : `http://${sourceAddress}`)
+      const scheme = parsed.protocol === 'https:' ? 'https' : 'http'
+      const rawHost = parsed.hostname || '192.168.1.1'
+      const host = rawHost.includes(':') && !rawHost.startsWith('[') ? `[${rawHost}]` : rawHost
+      return `${scheme}://${host}:7681`
+    } catch {
+      return 'http://192.168.1.1:7681'
+    }
+  }, [authState.address, credentials.address])
   const luciQuickUrl = `http://${String(credentials.address || '')
     .replace(/^https?:\/\//i, '')
     .replace(/\/$/, '')}/cgi-bin/luci?luci_username=root&luci_password=${encodeURIComponent(credentials.password || '')}`
@@ -2526,6 +2572,10 @@ function App() {
 
     if (activePage === 'network') {
       return <NetworkSettingsPage />
+    }
+
+    if (activePage === 'terminal') {
+      return <TerminalPage ttydUrl={ttydUrl} />
     }
 
     if (activePage === 'packages') {
