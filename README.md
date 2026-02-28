@@ -57,7 +57,7 @@ pnpm run dev
 示例：
 
 ```env
-VITE_ROUTER_ADDRESS=http://10.0.0.4
+VITE_ROUTER_ADDRESS=http://10.0.0.1
 VITE_ROUTER_PASSWORD=your_password
 VITE_ROUTER_AUTO_LOGIN=true
 ```
