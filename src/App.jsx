@@ -72,6 +72,7 @@ const INITIAL_NETWORK_FORM = {
 }
 
 const CHART_SERIES_LENGTH = 240
+const MODAL_TRANSITION_MS = 220
 
 const DEFAULT_SYSTEM_METRICS = {
   cpuCores: 0,
@@ -125,6 +126,25 @@ function pushAndTrim(previous, nextValue) {
   }
 
   return merged.slice(merged.length - CHART_SERIES_LENGTH)
+}
+
+function useAnimatedVisibility(open, duration = MODAL_TRANSITION_MS) {
+  const [shouldRender, setShouldRender] = useState(open)
+
+  useEffect(() => {
+    if (open) {
+      setShouldRender(true)
+      return undefined
+    }
+
+    const timer = window.setTimeout(() => {
+      setShouldRender(false)
+    }, duration)
+
+    return () => window.clearTimeout(timer)
+  }, [duration, open])
+
+  return shouldRender
 }
 
 function getSeriesBounds(seriesGroup) {
@@ -745,20 +765,30 @@ function SettingsModal({
   onLogout,
   onRunDiagnostics
 }) {
-  if (!open) {
+  const shouldRender = useAnimatedVisibility(open)
+
+  if (!shouldRender) {
     return null
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 transition-opacity duration-200 ${
+        open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+      }`}
+    >
       <button
         aria-label="关闭设置弹窗"
-        className="absolute inset-0 bg-black/50"
+        className={`absolute inset-0 bg-black/50 transition-opacity duration-200 ${open ? 'opacity-100' : 'opacity-0'}`}
         onClick={onClose}
         type="button"
       />
 
-      <section className="relative z-10 max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
+      <section
+        className={`relative z-10 max-h-[90vh] w-full max-w-3xl overflow-auto rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl transition-all duration-200 dark:border-zinc-700 dark:bg-zinc-900 ${
+          open ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-[0.98] opacity-0'
+        }`}
+      >
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">设置</h3>
@@ -875,6 +905,59 @@ function SettingsModal({
             targetAddress={credentials.address}
           />
         </div>
+      </section>
+    </div>
+  )
+}
+
+function AboutModal({ open, onClose }) {
+  const shouldRender = useAnimatedVisibility(open)
+
+  if (!shouldRender) {
+    return null
+  }
+
+  return (
+    <div
+      className={`fixed inset-0 z-[55] flex items-center justify-center p-4 transition-opacity duration-200 ${
+        open ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
+      }`}
+    >
+      <button
+        aria-label="关闭关于弹窗"
+        className={`absolute inset-0 bg-black/50 transition-opacity duration-200 ${open ? 'opacity-100' : 'opacity-0'}`}
+        onClick={onClose}
+        type="button"
+      />
+
+      <section
+        className={`relative z-10 w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl transition-all duration-200 dark:border-zinc-700 dark:bg-zinc-900 ${
+          open ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-[0.98] opacity-0'
+        }`}
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">关于 next-ui</h3>
+          <button
+            aria-label="关闭关于"
+            className="rounded-lg border border-zinc-200 bg-white p-1.5 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+            onClick={onClose}
+            type="button"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <p className="text-sm text-zinc-700 dark:text-zinc-300">
+          Github：
+          <a
+            className="ml-1 text-blue-600 hover:underline dark:text-blue-400"
+            href="https://github.com/miaoermua/next-ui"
+            rel="noreferrer"
+            target="_blank"
+          >
+            https://github.com/miaoermua/next-ui
+          </a>
+        </p>
       </section>
     </div>
   )
@@ -2480,42 +2563,7 @@ function App() {
         open={settingsOpen}
       />
 
-      {aboutOpen ? (
-        <div className="fixed inset-0 z-[55] flex items-center justify-center p-4">
-          <button
-            aria-label="关闭关于弹窗"
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setAboutOpen(false)}
-            type="button"
-          />
-
-          <section className="relative z-10 w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">关于 next-ui</h3>
-              <button
-                aria-label="关闭关于"
-                className="rounded-lg border border-zinc-200 bg-white p-1.5 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
-                onClick={() => setAboutOpen(false)}
-                type="button"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <p className="text-sm text-zinc-700 dark:text-zinc-300">
-              Github：
-              <a
-                className="ml-1 text-blue-600 hover:underline dark:text-blue-400"
-                href="https://github.com/miaoermua/next-ui"
-                rel="noreferrer"
-                target="_blank"
-              >
-                https://github.com/miaoermua/next-ui
-              </a>
-            </p>
-          </section>
-        </div>
-      ) : null}
+      <AboutModal open={aboutOpen} onClose={() => setAboutOpen(false)} />
 
       {successToast ? (
         <div className="fixed right-4 top-4 z-[60] rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 shadow-lg dark:border-emerald-900/50 dark:bg-emerald-950/50 dark:text-emerald-300">
@@ -2557,7 +2605,9 @@ function App() {
                     : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800'
                 }`}
                 onClick={() => {
-                  setActivePage(item.id)
+                  if (activePage !== item.id) {
+                    setActivePage(item.id)
+                  }
                   closeSidebar()
                 }}
                 type="button"
@@ -2622,7 +2672,11 @@ function App() {
           安全提醒：LuCI URL 传参仅建议在内网或 HTTPS 环境使用。
         </div>
 
-        <main className="p-8">{renderContent()}</main>
+        <main className="p-8">
+          <div className="animate-content-fade" key={activePage}>
+            {renderContent()}
+          </div>
+        </main>
       </div>
     </div>
   )
