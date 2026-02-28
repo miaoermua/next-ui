@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { fetchInstalledPackages } from '../api/router'
+import { Skeleton, SkeletonTextBlock } from '../components/Skeleton'
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
@@ -8,6 +9,7 @@ export function InstalledPackagesPage() {
   const [packages, setPackages] = useState([])
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loadedOnce, setLoadedOnce] = useState(false)
   const [statusText, setStatusText] = useState('')
   const [updatedAt, setUpdatedAt] = useState('')
   const [meta, setMeta] = useState({
@@ -43,6 +45,7 @@ export function InstalledPackagesPage() {
     } catch (error) {
       setStatusText(error?.message || '读取软件包失败')
     } finally {
+      setLoadedOnce(true)
       setLoading(false)
     }
   }
@@ -68,35 +71,54 @@ export function InstalledPackagesPage() {
     <section className="space-y-4">
       <div>
         <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">软件包（已安装）</h2>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">来源：/cgi-bin/luci/admin/system/packages?display=installed</p>
+        {loadedOnce ? (
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">来源：/cgi-bin/luci/admin/system/packages?display=installed</p>
+        ) : (
+          <div className="mt-2 max-w-sm">
+            <SkeletonTextBlock lines={1} />
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">软件包总数</p>
-          <p className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">{meta.total || 0}</p>
-        </div>
+        {loadedOnce ? (
+          <>
+            <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">软件包总数</p>
+              <p className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">{meta.total || 0}</p>
+            </div>
 
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">空闲空间</p>
-          <p className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-            {meta.freeSpacePercent ? `${meta.freeSpacePercent} (${meta.freeSpaceText || '-'})` : '-'}
-          </p>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-700"
-              style={{ width: `${clamp(meta.freeSpacePercentValue || 0, 0, 100)}%` }}
-            />
-          </div>
-          <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-            已用 {clamp(100 - (meta.freeSpacePercentValue || 0), 0, 100)}%
-          </p>
-        </div>
+            <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">空闲空间</p>
+              <p className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+                {meta.freeSpacePercent ? `${meta.freeSpacePercent} (${meta.freeSpaceText || '-'})` : '-'}
+              </p>
+              <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-700"
+                  style={{ width: `${clamp(meta.freeSpacePercentValue || 0, 0, 100)}%` }}
+                />
+              </div>
+              <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                已用 {clamp(100 - (meta.freeSpacePercentValue || 0), 0, 100)}%
+              </p>
+            </div>
 
-        <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">当前筛选结果</p>
-          <p className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">{filteredItems.length}</p>
-        </div>
+            <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">当前筛选结果</p>
+              <p className="mt-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">{filteredItems.length}</p>
+            </div>
+          </>
+        ) : (
+          Array.from({ length: 3 }, (_, index) => (
+            <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900" key={`meta-skeleton-${index}`}>
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="mt-2 h-6 w-20" />
+              <Skeleton className="mt-3 h-2 w-full" />
+              <Skeleton className="mt-2 h-3 w-16" />
+            </div>
+          ))
+        )}
       </div>
 
       <div className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
@@ -133,7 +155,18 @@ export function InstalledPackagesPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 bg-white text-zinc-700 dark:divide-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
-            {filteredItems.length ? (
+            {!loadedOnce && loading ? (
+              Array.from({ length: 12 }, (_, rowIndex) => (
+                <tr key={`pkg-skeleton-${rowIndex}`}>
+                  <td className="px-4 py-2.5">
+                    <Skeleton className="h-4 w-full" />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <Skeleton className="h-4 w-32" />
+                  </td>
+                </tr>
+              ))
+            ) : filteredItems.length ? (
               filteredItems.map((item) => (
                 <tr key={item.id}>
                   <td className="px-4 py-2.5 font-medium text-zinc-900 dark:text-zinc-100">{item.name}</td>

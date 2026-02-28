@@ -7,9 +7,34 @@ import {
   fetchDdnsGoStatus,
   setRouterAddress
 } from '../api/router'
+import { Skeleton, SkeletonTextBlock } from '../components/Skeleton'
+
+
+function PluginCardSkeleton({ rows = 5 }) {
+  return (
+    <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900" aria-hidden="true">
+      <div className="flex items-center justify-between">
+        <Skeleton className="h-4 w-40" />
+        <div className="flex gap-2">
+          <Skeleton className="h-7 w-24 rounded-full" />
+          <Skeleton className="h-7 w-20 rounded-full" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {Array.from({ length: rows }, (_, index) => (
+          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800" key={index}>
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="mt-2 h-4 w-full" />
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
 
 export function PluginsPage({ credentials, authState }) {
   const [loading, setLoading] = useState(false)
+  const [loadedOnce, setLoadedOnce] = useState(false)
   const [statusText, setStatusText] = useState('')
   const [updatedAt, setUpdatedAt] = useState('')
   const [adgConfig, setAdgConfig] = useState({
@@ -139,6 +164,7 @@ export function PluginsPage({ credentials, authState }) {
     } catch (error) {
       setStatusText(error?.message || '读取 AdGuardHome 配置失败，请确认 LuCI 登录态与插件安装状态。')
     } finally {
+      setLoadedOnce(true)
       setLoading(false)
     }
   }
@@ -157,7 +183,13 @@ export function PluginsPage({ credentials, authState }) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">插件</h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">LuCI 服务页面</p>
+          {loadedOnce ? (
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">LuCI 服务页面</p>
+          ) : (
+            <div className="mt-2 max-w-48">
+              <SkeletonTextBlock lines={1} />
+            </div>
+          )}
         </div>
         <button
           className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
@@ -169,6 +201,14 @@ export function PluginsPage({ credentials, authState }) {
         </button>
       </div>
 
+      {!loadedOnce && loading ? (
+        <>
+          <PluginCardSkeleton rows={5} />
+          <PluginCardSkeleton rows={3} />
+          <PluginCardSkeleton rows={6} />
+        </>
+      ) : (
+        <>
       <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">AdGuardHome 状态</h3>
@@ -399,6 +439,9 @@ export function PluginsPage({ credentials, authState }) {
           </div>
         </details>
       </section>
+
+        </>
+      )}
 
       <p className="text-xs text-zinc-500 dark:text-zinc-400">{statusText || `上次更新时间：${updatedAt || '--:--:--'}`}</p>
     </section>

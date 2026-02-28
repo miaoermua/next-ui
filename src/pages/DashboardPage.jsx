@@ -15,6 +15,7 @@ import {
   fetchPublicNetworkAddresses,
   fetchOverviewStatus
 } from '../api/router'
+import { Skeleton, SkeletonTextBlock } from '../components/Skeleton'
 
 const CHART_SERIES_LENGTH = 240
 
@@ -164,6 +165,30 @@ function extractCpuLabelFromHostModel(hostModel, fallback = 'CPU 型号未知') 
     .trim()
 
   return cleanLabel(snippet) || cleanLabel(source) || fallback
+}
+
+
+function DashboardCardSkeleton({ lines = 3 }) {
+  return (
+    <div className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900" aria-hidden="true">
+      <Skeleton className="h-4 w-28" />
+      <div className="mt-3 space-y-2">
+        {Array.from({ length: lines }, (_, index) => (
+          <Skeleton className="h-3.5 w-full" key={index} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function DashboardChartSkeleton() {
+  return (
+    <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900" aria-hidden="true">
+      <Skeleton className="h-4 w-40" />
+      <Skeleton className="mt-2 h-3 w-56" />
+      <Skeleton className="mt-4 h-44 w-full" />
+    </section>
+  )
 }
 
 function UsageCard({ icon: Icon, title, value, percent, description }) {
@@ -529,6 +554,7 @@ export function DashboardPage({ authState, credentials }) {
   const [lastUpdated, setLastUpdated] = useState('')
   const [arpDevices, setArpDevices] = useState([])
   const [dhcpv6Devices, setDhcpv6Devices] = useState([])
+  const [loadedOnce, setLoadedOnce] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -620,6 +646,7 @@ export function DashboardPage({ authState, credentials }) {
             hour12: false
           })
         )
+        setLoadedOnce(true)
       } catch {
         if (cancelled) {
           return
@@ -672,6 +699,7 @@ export function DashboardPage({ authState, credentials }) {
       }
     }
 
+    setLoadedOnce(false)
     updateDynamicMetrics()
     updateStaticMetrics()
 
@@ -721,9 +749,54 @@ export function DashboardPage({ authState, credentials }) {
     <section className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">系统概览</h2>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">LEDE 路由器核心状态监控</p>
+        {loadedOnce ? (
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">LEDE 路由器核心状态监控</p>
+        ) : (
+          <div className="mt-2 max-w-sm">
+            <SkeletonTextBlock lines={1} />
+          </div>
+        )}
       </div>
 
+      {!loadedOnce ? (
+        <>
+      <section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900" aria-hidden="true">
+        <Skeleton className="h-3.5 w-72" />
+      </section>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <DashboardCardSkeleton lines={2} />
+        <DashboardCardSkeleton lines={2} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <DashboardCardSkeleton lines={4} />
+        <DashboardCardSkeleton lines={4} />
+        <DashboardCardSkeleton lines={4} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+        <DashboardCardSkeleton lines={4} />
+        <DashboardCardSkeleton lines={4} />
+        <DashboardCardSkeleton lines={6} />
+      </div>
+
+      <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900" aria-hidden="true">
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-3 w-60" />
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <DashboardChartSkeleton />
+          <DashboardChartSkeleton />
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <DashboardCardSkeleton lines={7} />
+        <DashboardCardSkeleton lines={7} />
+      </div>
+        </>
+      ) : (
+        <>
       <section className="rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-900">
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
           {authState.authenticated ? 'UBUS 已认证' : 'UBUS 未认证'} ·
@@ -852,6 +925,8 @@ export function DashboardPage({ authState, credentials }) {
         <Devices6Card items={dhcpv6Devices} />
       </div>
 
+        </>
+      )}
     </section>
   )
 }

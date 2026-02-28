@@ -1,7 +1,20 @@
 import { useEffect, useState } from 'preact/hooks'
 import { fetchStartupEntries, fetchTopProcesses, setRouterAddress } from '../api/router'
+import { Skeleton, SkeletonTextBlock } from '../components/Skeleton'
 
-function ProcessTopCard({ processes, updatedAt, statusText, loading, onRefresh }) {
+function TableSkeletonRows({ columns, rows = 6 }) {
+  return Array.from({ length: rows }, (_, rowIndex) => (
+    <tr key={`skeleton-${rowIndex}`}>
+      {Array.from({ length: columns }, (_, colIndex) => (
+        <td className="px-3 py-2" key={`skeleton-${rowIndex}-${colIndex}`}>
+          <Skeleton className="h-3.5 w-full" />
+        </td>
+      ))}
+    </tr>
+  ))
+}
+
+function ProcessTopCard({ processes, updatedAt, statusText, loading, onRefresh, initialLoading }) {
   return (
     <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -31,7 +44,9 @@ function ProcessTopCard({ processes, updatedAt, statusText, loading, onRefresh }
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 bg-white text-zinc-700 dark:divide-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
-            {processes.length ? (
+            {initialLoading ? (
+              <TableSkeletonRows columns={5} rows={8} />
+            ) : processes.length ? (
               processes.map((item) => (
                 <tr key={item.id}>
                   <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-100">{item.pid}</td>
@@ -59,7 +74,7 @@ function ProcessTopCard({ processes, updatedAt, statusText, loading, onRefresh }
   )
 }
 
-function StartupItemsCard({ items, updatedAt, statusText, loading, onRefresh }) {
+function StartupItemsCard({ items, updatedAt, statusText, loading, onRefresh, initialLoading }) {
   return (
     <section className="space-y-4 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -88,7 +103,9 @@ function StartupItemsCard({ items, updatedAt, statusText, loading, onRefresh }) 
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 bg-white text-zinc-700 dark:divide-zinc-700 dark:bg-zinc-900 dark:text-zinc-200">
-            {items.length ? (
+            {initialLoading ? (
+              <TableSkeletonRows columns={4} rows={8} />
+            ) : items.length ? (
               items.map((item) => (
                 <tr key={item.id}>
                   <td className="px-3 py-2 font-medium text-zinc-900 dark:text-zinc-100">{item.priority}</td>
@@ -122,6 +139,8 @@ export function ServicesPage({ credentials }) {
   const [startupUpdatedAt, setStartupUpdatedAt] = useState('')
   const [startupLoading, setStartupLoading] = useState(false)
   const [startupStatus, setStartupStatus] = useState('')
+  const [processesLoaded, setProcessesLoaded] = useState(false)
+  const [startupLoaded, setStartupLoaded] = useState(false)
 
   const loadTopProcesses = async () => {
     try {
@@ -145,6 +164,7 @@ export function ServicesPage({ credentials }) {
     } catch {
       setProcessesStatus('读取进程列表失败，请确认 LuCI 登录态与页面访问权限。')
     } finally {
+      setProcessesLoaded(true)
       setProcessesLoading(false)
     }
   }
@@ -171,6 +191,7 @@ export function ServicesPage({ credentials }) {
     } catch {
       setStartupStatus('读取启动项失败，请确认 LuCI 登录态与访问权限。')
     } finally {
+      setStartupLoaded(true)
       setStartupLoading(false)
     }
   }
@@ -184,7 +205,13 @@ export function ServicesPage({ credentials }) {
     <section className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">服务</h2>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">系统进程 top 与系统服务：启动项 init.d</p>
+        {processesLoaded || startupLoaded ? (
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">系统进程 top 与系统服务：启动项 init.d</p>
+        ) : (
+          <div className="mt-2 max-w-sm">
+            <SkeletonTextBlock lines={1} />
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -192,6 +219,7 @@ export function ServicesPage({ credentials }) {
           loading={processesLoading}
           onRefresh={loadTopProcesses}
           processes={topProcesses}
+          initialLoading={!processesLoaded && processesLoading}
           statusText={processesStatus}
           updatedAt={processesUpdatedAt}
         />
@@ -200,6 +228,7 @@ export function ServicesPage({ credentials }) {
           items={startupItems}
           loading={startupLoading}
           onRefresh={loadStartupItems}
+          initialLoading={!startupLoaded && startupLoading}
           statusText={startupStatus}
           updatedAt={startupUpdatedAt}
         />

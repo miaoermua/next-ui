@@ -5,16 +5,20 @@ import {
   fetchNetworkLanConfig,
   fetchNetworkWanConfig
 } from '../api/router'
+import { Skeleton, SkeletonTextBlock } from '../components/Skeleton'
 
-const INITIAL_NETWORK_FORM = {
-  lanIp: '192.168.1.1',
-  lanMask: '255.255.255.0',
-  wanMode: 'dhcp',
-  wanIp: '192.168.100.10',
-  wanGateway: '192.168.100.1',
-  dnsPrimary: '223.5.5.5',
-  dnsSecondary: '114.114.114.114',
-  mtu: '1500'
+
+function ConfigCardSkeleton({ lines = 8 }) {
+  return (
+    <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900" aria-hidden="true">
+      <Skeleton className="h-4 w-36" />
+      <div className="space-y-2">
+        {Array.from({ length: lines }, (_, index) => (
+          <Skeleton className="h-3.5 w-full" key={index} />
+        ))}
+      </div>
+    </section>
+  )
 }
 
 function Field({ label, value, onChange, placeholder }) {
@@ -82,6 +86,7 @@ export function NetworkSettingsPage() {
     advertisedDnsDomains: []
   })
   const [loading, setLoading] = useState(false)
+  const [loadedOnce, setLoadedOnce] = useState(false)
   const [statusText, setStatusText] = useState('')
   const [updatedAt, setUpdatedAt] = useState('')
 
@@ -141,6 +146,7 @@ export function NetworkSettingsPage() {
     } catch (error) {
       setStatusText(error?.message || '读取 LAN/WAN 配置失败，请确认 LuCI 登录态。')
     } finally {
+      setLoadedOnce(true)
       setLoading(false)
     }
   }
@@ -153,54 +159,70 @@ export function NetworkSettingsPage() {
     <section className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">网络设置</h2>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">来自 LuCI 网络接口页（LAN/WAN）</p>
+        {loadedOnce ? (
+          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">来自 LuCI 网络接口页（LAN/WAN）</p>
+        ) : (
+          <div className="mt-2 max-w-sm">
+            <SkeletonTextBlock lines={1} />
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-        <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">LAN 配置</h3>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">协议：{lanConfig.protocol}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">IPv4：{lanConfig.ipv4}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">掩码：{lanConfig.netmask}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">网关：{lanConfig.gateway}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">IPv6 分配长度：{lanConfig.ipv6assign}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">
-            IPv6 地址：{lanConfig.ipv6addrs.length ? lanConfig.ipv6addrs.join(' / ') : '-'}
-          </p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">IPv6 前缀：{lanConfig.ipv6prefix}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">MTU：{lanConfig.mtu}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">
-            DNS：{lanConfig.dns.length ? lanConfig.dns.join(' / ') : '-'}
-          </p>
-        </section>
+        {!loadedOnce && loading ? (
+          <>
+            <ConfigCardSkeleton lines={10} />
+            <ConfigCardSkeleton lines={8} />
+            <ConfigCardSkeleton lines={9} />
+          </>
+        ) : (
+          <>
+            <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">LAN 配置</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">协议：{lanConfig.protocol}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">IPv4：{lanConfig.ipv4}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">掩码：{lanConfig.netmask}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">网关：{lanConfig.gateway}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">IPv6 分配长度：{lanConfig.ipv6assign}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">
+                IPv6 地址：{lanConfig.ipv6addrs.length ? lanConfig.ipv6addrs.join(' / ') : '-'}
+              </p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">IPv6 前缀：{lanConfig.ipv6prefix}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">MTU：{lanConfig.mtu}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">
+                DNS：{lanConfig.dns.length ? lanConfig.dns.join(' / ') : '-'}
+              </p>
+            </section>
 
-        <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">WAN 配置</h3>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">协议：{wanConfig.protocol}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">PPPoE 用户名：{wanConfig.pppoeUsername}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">PPPoE 密码：{wanConfig.pppoePasswordMasked}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">网关：{wanConfig.gateway}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">MTU：{wanConfig.mtu}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">
-            DNS：{wanConfig.dns.length ? wanConfig.dns.join(' / ') : '-'}
-          </p>
-        </section>
+            <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">WAN 配置</h3>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">协议：{wanConfig.protocol}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">PPPoE 用户名：{wanConfig.pppoeUsername}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">PPPoE 密码：{wanConfig.pppoePasswordMasked}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">网关：{wanConfig.gateway}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">MTU：{wanConfig.mtu}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">
+                DNS：{wanConfig.dns.length ? wanConfig.dns.join(' / ') : '-'}
+              </p>
+            </section>
 
-        <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
-          <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">LAN IPv6（DHCP/RA/NDP）</h3>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">Designated master：{lanIpv6Config.designatedMaster}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">路由通告服务：{lanIpv6Config.raServiceMode}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">DHCPv6 服务：{lanIpv6Config.dhcpv6ServiceMode}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">NDP 代理：{lanIpv6Config.ndpProxyMode}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">DHCPv6 模式：{lanIpv6Config.dhcpv6Mode}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">总是通告默认路由：{lanIpv6Config.alwaysAdvertiseDefaultRoute}</p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">
-            通告的 DNS 服务器：{lanIpv6Config.advertisedDnsServers.length ? lanIpv6Config.advertisedDnsServers.join(' / ') : '-'}
-          </p>
-          <p className="text-sm text-zinc-700 dark:text-zinc-200">
-            通告的 DNS 域名：{lanIpv6Config.advertisedDnsDomains.length ? lanIpv6Config.advertisedDnsDomains.join(' / ') : '-'}
-          </p>
-        </section>
+            <section className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">LAN IPv6（DHCP/RA/NDP）</h3>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">Designated master：{lanIpv6Config.designatedMaster}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">路由通告服务：{lanIpv6Config.raServiceMode}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">DHCPv6 服务：{lanIpv6Config.dhcpv6ServiceMode}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">NDP 代理：{lanIpv6Config.ndpProxyMode}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">DHCPv6 模式：{lanIpv6Config.dhcpv6Mode}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">总是通告默认路由：{lanIpv6Config.alwaysAdvertiseDefaultRoute}</p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">
+                通告的 DNS 服务器：{lanIpv6Config.advertisedDnsServers.length ? lanIpv6Config.advertisedDnsServers.join(' / ') : '-'}
+              </p>
+              <p className="text-sm text-zinc-700 dark:text-zinc-200">
+                通告的 DNS 域名：{lanIpv6Config.advertisedDnsDomains.length ? lanIpv6Config.advertisedDnsDomains.join(' / ') : '-'}
+              </p>
+            </section>
+          </>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center justify-between rounded-xl border border-zinc-200 bg-white px-5 py-4 dark:border-zinc-700 dark:bg-zinc-900">

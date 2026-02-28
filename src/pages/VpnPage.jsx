@@ -5,6 +5,7 @@ import {
   fetchOpenClashToolbarStatus,
   setRouterAddress
 } from '../api/router'
+import { Skeleton, SkeletonTextBlock } from '../components/Skeleton'
 
 const CHART_SERIES_LENGTH = 240
 
@@ -222,6 +223,26 @@ function VpnTrafficCard({ iface, downSeries, upSeries }) {
   )
 }
 
+
+function VpnCardSkeleton() {
+  return (
+    <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900" aria-hidden="true">
+      <div className="mb-4 flex items-center justify-between">
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-7 w-20 rounded-full" />
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {Array.from({ length: 6 }, (_, index) => (
+          <div className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800" key={index}>
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="mt-2 h-4 w-full" />
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
 function OpenClashStatusCard({ status, loading, error, zashboardUrl, luciSettingsUrl }) {
   return (
     <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900">
@@ -304,6 +325,7 @@ export function VpnPage({ credentials, authState }) {
   const [ifaceCards, setIfaceCards] = useState([])
   const [statusText, setStatusText] = useState('')
   const [loading, setLoading] = useState(false)
+  const [loadedOnce, setLoadedOnce] = useState(false)
   const [openClash, setOpenClash] = useState(null)
   const [openClashAvailable, setOpenClashAvailable] = useState(false)
   const [openClashLoading, setOpenClashLoading] = useState(false)
@@ -372,6 +394,7 @@ export function VpnPage({ credentials, authState }) {
       setStatusText(error?.message || '读取 VPN 接口状态失败。')
       setIfaceCards([])
     } finally {
+      setLoadedOnce(true)
       setLoading(false)
     }
   }
@@ -465,7 +488,13 @@ export function VpnPage({ credentials, authState }) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">VPN</h2>
-          <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">自动检测 EasyTier / Tailscale，并展示实时流量走势</p>
+          {loadedOnce ? (
+            <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">自动检测 EasyTier / Tailscale，并展示实时流量走势</p>
+          ) : (
+            <div className="mt-2 max-w-md">
+              <SkeletonTextBlock lines={1} />
+            </div>
+          )}
         </div>
         <button
           className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-sm text-zinc-700 transition hover:bg-zinc-100 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
@@ -480,7 +509,9 @@ export function VpnPage({ credentials, authState }) {
         </button>
       </div>
 
-      {openClashAvailable ? (
+      {!loadedOnce && openClashLoading ? (
+        <VpnCardSkeleton />
+      ) : openClashAvailable ? (
         <OpenClashStatusCard
           error={openClashError}
           loading={openClashLoading}
@@ -490,7 +521,21 @@ export function VpnPage({ credentials, authState }) {
         />
       ) : null}
 
-      {ifaceCards.length ? (
+      {!loadedOnce && loading ? (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          {Array.from({ length: 2 }, (_, index) => (
+            <section className="rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-700 dark:bg-zinc-900" key={`vpn-traffic-skeleton-${index}`}>
+              <Skeleton className="h-4 w-36" />
+              <Skeleton className="mt-2 h-3 w-56" />
+              <Skeleton className="mt-4 h-44 w-full" />
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <Skeleton className="h-6 w-full" />
+                <Skeleton className="h-6 w-full" />
+              </div>
+            </section>
+          ))}
+        </div>
+      ) : ifaceCards.length ? (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           {ifaceCards.map((iface) => (
             <VpnTrafficCard
